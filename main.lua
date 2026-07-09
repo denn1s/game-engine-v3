@@ -14,8 +14,8 @@
 -- and watch the two squares.
 ----------------------------------------------------------------------
 
-local CAPS = { 0, 30, 60, 144 } -- 0 = uncapped
-local capIndex = 1
+local CAPS = { 0, 5, 30, 60, 144 } -- 0 = uncapped
+local capIndex = 2
 local frameCap = CAPS[capIndex]
 
 local SPEED = 150            -- pixels per SECOND (used with dt)
@@ -40,11 +40,12 @@ function love.update(dt)
     if goodSquare.x > w then goodSquare.x = -24 end
     if badSquare.x > w then badSquare.x = -24 end
 
-    -- Crude frame cap: sleep away the time this frame didn't need.
-    -- (Same idea as the busy-wait in loop.lua, but we can actually
-    -- sleep — the engine's loop does this properly in love.run.)
-    if frameCap > 0 and dt < 1 / frameCap then
-        love.timer.sleep(1 / frameCap - dt)
+    -- Crude frame cap: assume the frame's own work takes ~no time and
+    -- just sleep one full frame period. Real frames aren't free, so the
+    -- FPS reads slightly UNDER the cap (~58 at 60) — good enough here.
+    -- (The engine's loop does this properly in love.run.)
+    if frameCap > 0 then
+        love.timer.sleep(1 / frameCap)
     end
 end
 
