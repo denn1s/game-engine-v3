@@ -8,18 +8,22 @@
 -- played is this loop, with better update() and render() functions.
 ----------------------------------------------------------------------
 
-local FPS_CAP = 30
+local FPS_CAP = 60
 local DURATION = 15 -- seconds; we have no input, so we quit on a timer
-local WIDTH = 60    -- columns of our "screen"
-local SPEED = 25    -- columns per SECOND (note: dt-based, like always)
+local WIDTH = 10    -- columns of our "screen"
+local SPEED = 1    -- columns per SECOND (note: dt-based, like always)
 
 local now = os.clock
+
+-- ANSI escape codes (terminal control)
+local HIDE_CURSOR = "\27[?25l"
+local SHOW_CURSOR = "\27[?25h"
 
 ----------------------------------------------------------------------
 -- 1. INIT: create the world
 ----------------------------------------------------------------------
 local ball = { x = 1, dir = 1 }
-io.write("\27[?25l") -- ANSI escape code: hide the terminal cursor
+io.write(HIDE_CURSOR)
 
 local function update(dt)
     ball.x = ball.x + ball.dir * SPEED * dt
@@ -38,7 +42,10 @@ end
 -- 2. THE GAME LOOP
 ----------------------------------------------------------------------
 local startTime = now()
-local last = startTime
+-- Pretend the frame before the first one took exactly one target frame.
+-- Otherwise the first dt is ~0 and 1/dt shows a bogus six-digit FPS,
+-- which is wider than "%3d" and leaves garbage on the line.
+local last = startTime - 1 / FPS_CAP
 
 while now() - startTime < DURATION do
     local frameStart = now()
@@ -65,4 +72,4 @@ end
 ----------------------------------------------------------------------
 -- 3. CLEANUP: release what we took (here: restore the cursor)
 ----------------------------------------------------------------------
-io.write("\27[?25h\nDone. That was a game loop.\n")
+io.write(SHOW_CURSOR .. "\nDone. That was a game loop.\n")
