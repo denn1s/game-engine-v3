@@ -35,6 +35,7 @@ git diff 01-Pong..02-ECS
 | `01-Pong` | 2–3 | **Lab 1:** Pong from scratch |
 | `02-ECS` | 3 | **Lab 2:** Pong on a hand-written ECS: Registry, Scene, Systems, events |
 | `03-Scenes` | 4 | The Game layer: scene factories, deferred switching, payloads |
+| `04-DebugTools` | 5 | Vendored [imlove](../imlove), entity inspector, pause & frame-step |
 
 More branches appear as the semester advances.
 
