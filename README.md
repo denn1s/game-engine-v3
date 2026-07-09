@@ -1,145 +1,185 @@
-# Lesson 03 — Scenes and the Game layer
+# Lesson 04 — Debug tools: the entity inspector
 
-> PIA week 4 · Branch `03-Scenes` · Previous: `02-ECS`
-
-```sh
-love .
-```
-
-Pong is now a complete product: title screen → match → results → back to the
-title. Same mechanics; the whole diff is architecture:
+> PIA week 5 · Branch `04-DebugTools` · Previous: `03-Scenes`
 
 ```sh
-git diff 02-ECS..03-Scenes
+love . --debug     # start with the inspector open
+love .             # or press F1 in game
 ```
 
-## 1. The state machine grows up
+**F1** toggles the inspector · **F9** pauses · **F10** steps one frame.
 
-Lesson 01 had a `state` variable (`"serve" | "play" | "gameover"`) and every
-function branched on it. The README back then called it "the embryo of the
-scene system". This is the payoff: each state is now a **Scene** — a full
-screen of the game with its own registry and its own systems — and a **Game**
-layer that owns them and switches between them.
-
-```
-Game
-├── factories: menu, play, gameover     (how to BUILD each scene)
-└── current scene                       (the one running right now)
+```sh
+git diff 03-Scenes..04-DebugTools
 ```
 
-Look at what got *deleted*: `match.state` is gone, the
-`if state == "play"` gate in `love.update` is gone, the restart logic in
-`keypressed` is gone. Nothing tracks "where we are" — being in a scene IS the
-state. main.lua shrank to: register scenes, start, forward callbacks.
+## 1. Our first (and only) dependency
 
-## 2. Scenes are factories, recreated fresh every entry
+Everything in this course is written from scratch — except this. Today we
+**vendor** a library: [imlove](../imlove), an immediate-mode UI for LÖVE,
+written in pure Lua, whose API deliberately mirrors
+[Dear ImGui](https://github.com/ocornut/imgui) — the tool used for debug UIs
+in a huge share of real engines (and what the C++/Odin people among you
+would use directly).
 
-Each scene lives in its own file (`src/scenes/`) and exports a **factory** —
-a function that builds the scene from scratch:
+Vendoring means: copy `imlove.lua` into `lib/`, commit it, done. No package
+manager, no version drift, and the file is right there when you're curious.
+That's how game studios actually consume small dependencies. Read its README
+before class — integrating a library *from its docs* is the skill being
+practiced; we will not study its internals (building UI is its own lesson,
+later, when your game needs menus and card hands).
+
+## 2. Immediate-mode UI, the 5-minute version
+
+There are two ways to build UIs:
+
+- **Retained mode** (the DOM, Qt, Unity's UI Toolkit): you *create* widget
+  objects, they persist, you mutate them, and callbacks fire back at you.
+- **Immediate mode** (Dear ImGui, and now imlove): there are no widget
+  objects. Every frame you *call functions* — and the call is the widget:
 
 ```lua
-return function(payload)
-    local scene = Scene.new("play")
-    scene:addSystem(BallSpawnSystem)
-    ...
-    return scene
+if imlove.Button("step (F10)") then
+    stepOnce = true
 end
 ```
 
-The Game never reuses a scene instance. Entering = `factory(payload)` then
-`scene:setup()`; leaving = `scene:unload()`. A rematch isn't "reset all the
-fields we can remember" — it's a brand-new scene where every system's
-`setup()` runs again. **No stale state can survive a visit**, by
-construction. (What *should* survive — decks, affection, progress, once the
-real game arrives — will live in data outside the scenes, not in entities.
-That's a coming lesson.)
+The button "exists" only because that line runs this frame. State lives in
+*your* variables, not in the UI; the `if` handles the click right where the
+button is declared. For tools that visualize rapidly-changing game state,
+this is dramatically less code — the UI is redeclared from the current truth
+every frame, so it can never be stale. (Sound familiar? Our `RenderSystem`
+redraws the world from the registry every frame. Same philosophy.)
 
-## 3. Switching is requested through data — never called
+The cost: the UI must actually run every frame, and identity needs care —
+two widgets with the same label are the same widget, which is why lists use
+`PushID`/`PopID` (see the entity loop in `DebugOverlay.lua`).
 
-No system calls `Game.switch()`. There is no such function to call. To
-change scenes, a system spawns an event entity, same pattern as
-`serveRequest`:
+## 3. The overlay is engine, not game
+
+`src/debug/DebugOverlay.lua` is **not a system** and belongs to no scene. It
+sits *next to* the Game, watching whatever `Game.current()` returns, and it
+survives scene switches. Scenes never know it's there. That's the right
+altitude for tools: they observe the game from outside, like a debugger
+observes a process.
+
+main.lua wires it in with the standard imgui integration dance:
 
 ```lua
-registry:spawn({
-    switchRequest = {
-        to = "gameover",
-        payload = { left = match.left, right = match.right },
-    },
-})
+DebugOverlay.beginFrame(Game.current())   -- top of love.update
+if DebugOverlay.shouldUpdate() then       -- the pause gate
+    Game.update(dt)
+end
+...
+Game.draw()
+DebugOverlay.draw()                       -- last: UI on top
 ```
 
-`Game.update` runs the scene's frame **first**, and only then looks for a
-request and performs the switch. Why deferred? Imagine switching in the
-middle of an update: the current scene gets unloaded while its own systems
-are still iterating its registry — logic running over a world that's being
-demolished around it. Real engines defer scene transitions for exactly this
-reason; ours does it in four lines.
+and every input callback asks the overlay first:
 
-The **payload** is how a dying scene sends data to the next one. The
-gameover factory turns it into registry data (`finalScore`), and its render
-system queries it like any other component. Payloads carry *transition*
-data; they are not storage.
+```lua
+function love.keypressed(key)
+    if DebugOverlay.keypressed(key) then return end -- UI consumed it
+    Game.keypressed(key)
+end
+```
 
-## 4. The bug that became impossible
+That "ask the UI first" pattern is `WantCaptureMouse` from real ImGui, and it
+matters *now* because our card game will be mouse-driven: without it,
+clicking a debug button would also click whatever card is under the cursor.
 
-Last lesson, scoring the final point left a stale `serveRequest` that
-hatched a ghost ball in the next match. We patched it with a guard and a
-restart sweep. **Both patches are deleted in this diff** — look for them.
-The win now switches scenes, the play scene's registry is destroyed, and
-the stale request dies with it. That's what good architecture does: it
-doesn't fix bugs, it makes them *unrepresentable*. (The `match.state`
-component also vanished — the scene graph absorbed it.)
+## 4. Tools need reflection: two new Registry queries
 
-## 5. New system hook: `keypressed`
+The game never asks "which entities exist?" — systems always know which
+components they want. But the inspector must display *everything, without
+knowing any component names up front*. So the Registry gains two
+tool-oriented queries:
 
-Menus are *discrete* input — lesson 01's polling-vs-events distinction,
-now with teeth: polling `isDown("space")` in the menu would fire again
-next frame *inside the play scene*, because the key is still held while
-the world changes underneath it. So input events flow
-`love.keypressed → Game → scene:keypressed(key) → systems` and a system
-opts in by implementing the hook:
+```lua
+registry:entities()           -- every entity, sorted
+registry:componentsOf(entity) -- its component names, sorted
+```
 
-- `MenuSystem.keypressed` — SPACE requests the play scene
-- `GameOverSystem.keypressed` — SPACE requests the menu
-- `DebugSystem.keypressed` — B requests an extra ball (main.lua's last
-  entity-touching code, now a proper system)
-- ESC lives in `Game.keypressed`: quitting is a Game concern, not a scene's
+This is reflection, engine-flavored, and it's a pattern worth noticing:
+building a tool often forces the engine to grow an introspection API that
+gameplay code never needed.
 
-A system is now a table with up to five hooks:
-`setup / update / draw / keypressed / unload`.
+## 5. Pause and frame-step
 
-## 6. New responsibility, new system: WinCheckSystem
+Pause is one boolean in the right place. `DebugOverlay.shouldUpdate()` gates
+`Game.update` — and *only* `Game.update`: drawing continues (you're looking
+at the frozen frame) and the overlay continues (a paused game with a dead UI
+would be useless). "Step" grants exactly one update while paused.
 
-`ScoringSystem` awards points. Deciding what a finished match *means* —
-leave the scene, carry the score out — is a different consequence, so it's
-a different system, running right after. This split matters beyond
-cleanliness: win conditions change per game mode (our card battles win by
-HP, dates "win" by affection), while scoring-like bookkeeping stays stable.
-Small systems with one consequence each are cheap to swap.
+Details that make it trustworthy:
 
-## 7. The smell we're keeping (on purpose)
+- Hiding the overlay lifts the pause — a game frozen by an invisible tool is
+  a bug report waiting to happen.
+- The selected entity is validated every frame (it may have been destroyed)
+  and the selection resets on scene switches (entity numbers restart with
+  each registry).
 
-Three render systems each create their own fonts in `setup` and drop
-them in `unload`. It works, and the lifecycle is honest — but the
-duplication smells, and loading the same asset every time a scene is
-entered won't survive contact with real sprite sheets. Sit with the smell:
-the **asset cache** lesson is coming, and now you know why it exists.
+## 6. The class demo: catching an event in the act
+
+The payoff for everything this course has built so far:
+
+1. Start a match, press **F9** to pause.
+2. Select the ball; drag its `position.x` slider — you're editing the
+   simulation mid-frame, and the render system draws whatever you set,
+   because the registry *is* the game state and everything else just reads it.
+3. Now nudge `position.x` past the right edge and press **F10** once.
+   Look at the entity list: the ball is **gone**, the score went up, and a
+   brand-new entity holding only a `serveRequest` component sits in the list
+   — the event, frozen in the one frame of its life.
+4. Press **F10** again: the request is gone, a new ball exists (new entity
+   number — check it), and the serve is in flight.
+
+You just *watched* the events-as-entities pattern from lesson 02 execute,
+frame by frame. Also fun: pause on the menu, press SPACE, and find the
+lingering `switchRequest` — it executes the moment you unpause.
+
+## 7. A war story: the tool found a real bug
+
+The first time this lesson ran, starting a match crashed the game:
+`Cannot use object after it has been released`. The chain: our render
+systems called `font:release()` in `unload`; the released font was still
+`love.graphics`' *current* font; and imlove v1.0.0 adopted the current font
+as its UI font at `NewFrame` — so that same frame's `Render` drew with a
+dead object. A **use-after-free, in Lua.**
+
+Two fixes shipped:
+
+- **imlove v1.0.1** creates and owns its font. A tool must not depend on
+  objects whose lifetime the game controls.
+- Our `unload` hooks now just **drop references** and let the garbage
+  collector free them. `release()` reclaims GPU memory immediately, which
+  sounds responsible — but calling it on something that shared state still
+  references trades a little memory for a crash. In a GC language, dropping
+  the reference *is* the cleanup; reach for `release()` only on big assets
+  you can prove nothing else holds.
+
+Note the shape of the event: the bug has existed since lesson 03 — it just
+never detonated, because nothing *used* the released font before something
+replaced it. It worked by luck. The inspector didn't create the bug; it
+revealed it. Good tools do that, and it's also why you integrate tools
+early instead of "when we need them".
 
 ## Exercises (for your own game repo)
 
-1. Add a "How to play" scene: reachable from the menu with H, returns with
-   SPACE. Count how many existing files you had to touch (it should be: one
-   new scene file, one new system, one `registerScene` line).
-2. On the gameover screen, add R for an instant rematch (straight to play,
-   skipping the menu). One line — which one, and in which system?
-3. Add a 3-2-1 serve countdown to the play scene: a `countdown` component,
-   a system that ticks it with `dt`, and balls that only move once it hits
-   zero. (Last lesson's "serve state" exercise, scene-flavored.)
-4. Two systems spawn a `switchRequest` on the same frame. What does our
-   Game do? What *should* it do? (Read `Registry:first` before answering.)
+1. Add a **spawn ball** button to the inspector. (One `Button` call plus one
+   `spawn` — but *which* registry, and what happens if you press it on the
+   menu scene? Make it behave sensibly.)
+2. Add a **time scale** slider (0.1×–3×) that multiplies the `dt` passed to
+   `Game.update`. Slow motion for free — where's the right place to apply it?
+3. Show the scene's systems in the inspector, in order. What's missing from
+   our system tables to display them nicely, and what's the least invasive
+   way to add it?
+4. The number sliders are hard-coded to ±960, which is clumsy for `winScore`
+   and useless for very large values. Real ImGui solves this with `DragFloat`
+   (unbounded, drag to change). Read imlove's README: what would you propose
+   for its v1.1?
 
 ## Next class
 
-`04` — the card game begins: the real title screen, drawing images from
-files, and the asset cache that kills the font smell.
+`05` — the card game begins: the real title screen, images from files, and
+the asset cache that finally kills the font smell from lesson 03.

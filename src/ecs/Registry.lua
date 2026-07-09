@@ -86,6 +86,37 @@ function Registry:query(...)
     return result
 end
 
+-- Every entity that exists, in a stable order. Nothing in the GAME needs
+-- this — systems always know which components they want. It exists for
+-- TOOLS: the debug inspector asks "what's here?" without knowing any
+-- component names up front. (This is reflection, engine-flavored.)
+function Registry:entities()
+    local seen = {}
+    local result = {}
+    for _, store in pairs(self.components) do
+        for entity in pairs(store) do
+            if not seen[entity] then
+                seen[entity] = true
+                result[#result + 1] = entity
+            end
+        end
+    end
+    table.sort(result)
+    return result
+end
+
+-- The names of every component an entity has, sorted. Also for tools.
+function Registry:componentsOf(entity)
+    local result = {}
+    for name, store in pairs(self.components) do
+        if store[entity] ~= nil then
+            result[#result + 1] = name
+        end
+    end
+    table.sort(result)
+    return result
+end
+
 -- For "singleton" components that exist on exactly one entity (match
 -- state, settings...). Returns entity, data.
 function Registry:first(name)
