@@ -1,5 +1,6 @@
--- Detects when a ball leaves the screen, updates the match score (a
--- singleton component), and checks the win condition.
+-- Detects when a ball leaves the screen and updates the match score (a
+-- singleton component). Nothing more: serving is BallSpawnSystem's job,
+-- and deciding whether the match is over is WinCheckSystem's job.
 --
 -- It does NOT spawn the next ball. It destroys the scored ball and
 -- emits a `serveRequest` event-entity; the BallSpawnSystem takes it
@@ -12,7 +13,7 @@ function ScoringSystem.setup(scene)
     -- a "prefab": a plain table of components, ready to spawn. The table
     -- is NOT the entity — the entity is the number spawn() returns.
     local matchPrefab = {
-        match = { left = 0, right = 0, winScore = 5, state = "play" },
+        match = { left = 0, right = 0, winScore = 5 },
     }
     scene.registry:spawn(matchPrefab)
 end
@@ -37,17 +38,11 @@ function ScoringSystem.update(scene, dt)
 
         if serveDirection then
             registry:destroy(ballEntity)
-            -- only re-serve if this point didn't end the match: a request
-            -- spawned on the final point would never be consumed (updates
-            -- stop on gameover) and hatch a ghost ball next match
-            if match.left < match.winScore and match.right < match.winScore then
-                registry:spawn({ serveRequest = { direction = serveDirection } })
-            end
+            -- no "is the match over?" guard needed anymore: if this was
+            -- the final point, the whole scene (and this request with it)
+            -- is destroyed before anyone could consume it
+            registry:spawn({ serveRequest = { direction = serveDirection } })
         end
-    end
-
-    if match.left >= match.winScore or match.right >= match.winScore then
-        match.state = "gameover"
     end
 end
 

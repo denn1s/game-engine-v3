@@ -1,210 +1,145 @@
-# Lesson 02 — ECS: Entities, Components, Systems (Lab 2)
+# Lesson 03 — Scenes and the Game layer
 
-> PIA week 3 · Branch `02-ECS` · Previous: `01-Pong`
+> PIA week 4 · Branch `03-Scenes` · Previous: `02-ECS`
 
 ```sh
 love .
 ```
 
-Same Pong as last class. Press **B** during play. Keep pressing it.
-
-See the whole refactor:
+Pong is now a complete product: title screen → match → results → back to the
+title. Same mechanics; the whole diff is architecture:
 
 ```sh
-git diff 01-Pong..02-ECS
+git diff 02-ECS..03-Scenes
 ```
 
-## 1. Why change an architecture that worked?
+## 1. The state machine grows up
 
-Lesson 01 used the classic OO approach: a `Paddle` class, a `Ball` class, each
-owning its data *and* its behavior. It worked great — at this size.
-
-Now imagine our real game. A card that sits in your hand, a card flying to the
-table, a date character that walks the overworld AND appears in dialogue
-scenes, a menu cursor... With inheritance you end up with the famous **class
-explosion**: `MovingDrawableClickableCard extends DrawableClickableCard
-extends...` — and every new combination of abilities needs a new class.
-
-**ECS flips the model**: instead of asking *"what IS this object?"* (its
-class), we ask *"what does it HAVE?"* (its components).
-
-- **Entity** — just a number. Entity 7. It has no data and no behavior; it
-  only "exists" as a key inside the registry. There is no object to delete.
-- **Component** — plain data attached to an entity: `position = {x, y}`,
-  `velocity = {vx, vy}`, `paddle = {upKey, downKey, speed}`.
-- **System** — logic that runs over every entity that has a certain set of
-  components. The `MovementSystem` moves *anything* with `position` +
-  `velocity`. It has no idea whether that thing is a ball, a card, or a love
-  interest.
-
-Behavior emerges from composition: an entity moves *because* it has a
-velocity, collides *because* it has a size, is controllable *because* it has
-a paddle component.
-
-## 2. The architecture, in layers
+Lesson 01 had a `state` variable (`"serve" | "play" | "gameover"`) and every
+function branched on it. The README back then called it "the embryo of the
+scene system". This is the payoff: each state is now a **Scene** — a full
+screen of the game with its own registry and its own systems — and a **Game**
+layer that owns them and switches between them.
 
 ```
-Scene  ("pong")               one screen of the game
-├── registry                  the DATA
-│     position = { [2]={x,y}, [3]={x,y}, [4]={x,y} }
-│     velocity = { [2]=..., [3]=..., [4]=... }
-│     paddle   = { [2]=..., [3]=... }
-│     ball     = { [4]={} }
-│     match    = { [1]={left,right,winScore,state} }
-└── systems                   the LOGIC, in frame order
-      BallSpawnSystem, PaddleControlSystem, MovementSystem, ClampSystem,
-      BounceWallsSystem, PaddleHitsSystem, ScoringSystem, RenderSystem
+Game
+├── factories: menu, play, gameover     (how to BUILD each scene)
+└── current scene                       (the one running right now)
 ```
 
-The **Registry** (`src/ecs/Registry.lua`) mirrors entt's registry from the
-C++ course: pure component storage, no logic.
+Look at what got *deleted*: `match.state` is gone, the
+`if state == "play"` gate in `love.update` is gone, the restart logic in
+`keypressed` is gone. Nothing tracks "where we are" — being in a scene IS the
+state. main.lua shrank to: register scenes, start, forward callbacks.
+
+## 2. Scenes are factories, recreated fresh every entry
+
+Each scene lives in its own file (`src/scenes/`) and exports a **factory** —
+a function that builds the scene from scratch:
 
 ```lua
-local entity = registry:spawn({ position = {x=0,y=0}, ball = {} })
-registry:get(entity, "position")          -- read/write a component
-registry:query("position", "velocity")    -- entities having ALL of these
-registry:first("match")                   -- singleton lookup: entity, data
-registry:destroy(entity)                  -- forget it in every store
+return function(payload)
+    local scene = Scene.new("play")
+    scene:addSystem(BallSpawnSystem)
+    ...
+    return scene
+end
 ```
 
-Storage is **one table per component type**, indexed by entity — the
-data-oriented layout from week 1. In C++ this is what makes ECS
-cache-friendly; in Lua we keep the shape (and the mental model).
+The Game never reuses a scene instance. Entering = `factory(payload)` then
+`scene:setup()`; leaving = `scene:unload()`. A rematch isn't "reset all the
+fields we can remember" — it's a brand-new scene where every system's
+`setup()` runs again. **No stale state can survive a visit**, by
+construction. (What *should* survive — decks, affection, progress, once the
+real game arrives — will live in data outside the scenes, not in entities.
+That's a coming lesson.)
 
-The **Scene** (`src/ecs/Scene.lua`) owns a registry plus an *ordered* list of
-systems, and pumps them from `update`/`draw`. Right now the game has exactly
-one scene; when scene switching arrives (menu → overworld → battle → date),
-we'll add a Game layer that swaps scenes — the classes are already shaped
-for it.
+## 3. Switching is requested through data — never called
 
-Systems receive the scene: `MovementSystem.update(scene, dt)` reaches the
-data through `scene.registry` (and later, scene-level things like the camera).
+No system calls `Game.switch()`. There is no such function to call. To
+change scenes, a system spawns an event entity, same pattern as
+`serveRequest`:
 
-A system is a plain table implementing any of **four lifecycle hooks**:
-
-| Hook | When | Used here by |
-|---|---|---|
-| `setup(scene)` | once, when the scene starts | every system that owns something: `ScoringSystem` spawns the match, `PaddleControlSystem` the paddles, `BallSpawnSystem` the opening serve, `RenderSystem` its fonts |
-| `update(scene, dt)` | every frame | the seven logic systems |
-| `draw(scene)` | every frame | `RenderSystem` |
-| `unload(scene)` | when the scene ends | `RenderSystem` drops its fonts (wired to `love.quit` for now) |
-
-(Purist note: `setup`/`unload` aren't textbook ECS — but "each system creates
-and cleans up what it owns" keeps main.lua from becoming a god-file, and it's
-exactly the shape scene switching needs later.) The result: **main.lua spawns
-zero entities.** It assembles the scene, forwards LÖVE's callbacks, and gets
-out of the way.
-
-## 3. Pong, decomposed
-
-| Lesson 01 (OO) | Lesson 02 (ECS) |
-|---|---|
-| `Paddle` class | entity + `position, size, velocity, paddle, clamp` |
-| `Ball` class | entity + `position, size, velocity, ball, bounceWalls` |
-| `Ball.new()` / `Ball:reset()` | `BallSpawnSystem` + `serveRequest` events |
-| `score` table in main.lua | entity + `match` (a **singleton component**) |
-| `Paddle:update` | `PaddleControlSystem` + `MovementSystem` + `ClampSystem` |
-| `Ball:update` | `MovementSystem` + `BounceWallsSystem` + `PaddleHitsSystem` |
-| score check in `love.update` | `ScoringSystem` |
-| the `draw` methods | one `RenderSystem` |
-| object creation in `love.load` | each system's `setup()` creates what it owns |
-
-Notice the systems are *tiny* — most are 15 lines. That's healthy ECS: many
-small systems, each doing one thing to one query.
-
-**System order is frame order** and it matters:
-
-```
-BallSpawnSystem      (consume serveRequest events, create balls)
-PaddleControlSystem  (input -> velocity)
-MovementSystem       (velocity -> position)
-ClampSystem          (fix paddle positions)
-BounceWallsSystem    (fix ball positions)
-PaddleHitsSystem     (resolve collisions)
-ScoringSystem        (react to what happened)
-RenderSystem         (draw the final truth)
+```lua
+registry:spawn({
+    switchRequest = {
+        to = "gameover",
+        payload = { left = match.left, right = match.right },
+    },
+})
 ```
 
-Swap `MovementSystem` and `ClampSystem` and paddles escape the screen for one
-frame. Ordering bugs like this are an entire category of engine bugs — now
-you know where to look for them.
+`Game.update` runs the scene's frame **first**, and only then looks for a
+request and performs the switch. Why deferred? Imagine switching in the
+middle of an update: the current scene gets unloaded while its own systems
+are still iterating its registry — logic running over a world that's being
+demolished around it. Real engines defer scene transitions for exactly this
+reason; ours does it in four lines.
 
-## 4. How systems talk: events as entities
+The **payload** is how a dying scene sends data to the next one. The
+gameover factory turns it into registry data (`finalScore`), and its render
+system queries it like any other component. Payloads carry *transition*
+data; they are not storage.
 
-Systems never call each other, and they don't take parameters. They
-communicate the ECS way: **by writing data into the registry**.
+## 4. The bug that became impossible
 
-Watch a point being scored:
+Last lesson, scoring the final point left a stale `serveRequest` that
+hatched a ghost ball in the next match. We patched it with a guard and a
+restart sweep. **Both patches are deleted in this diff** — look for them.
+The win now switches scenes, the play scene's registry is destroyed, and
+the stale request dies with it. That's what good architecture does: it
+doesn't fix bugs, it makes them *unrepresentable*. (The `match.state`
+component also vanished — the scene graph absorbed it.)
 
-1. `ScoringSystem` sees a ball past the edge. It updates the score, destroys
-   the ball, and spawns an entity with a single component:
-   `serveRequest = { direction = -1 }`. That entity *is* the event.
-2. Next frame, `BallSpawnSystem` queries `serveRequest`, destroys the request
-   (consuming the event), and spawns a fresh ball toward that direction.
+## 5. New system hook: `keypressed`
 
-The B key and `love.load` request balls the exact same way — nobody knows how
-balls are made except `BallSpawnSystem`. Later in the course this pattern
-grows into damage events, dialogue triggers, and card effects. And note what
-serving is now: the "ball" your paddle was hitting gets destroyed and a new
-entity appears — nothing survived but data. Entities really are just numbers.
+Menus are *discrete* input — lesson 01's polling-vs-events distinction,
+now with teeth: polling `isDown("space")` in the menu would fire again
+next frame *inside the play scene*, because the key is still held while
+the world changes underneath it. So input events flow
+`love.keypressed → Game → scene:keypressed(key) → systems` and a system
+opts in by implementing the hook:
 
-**Events have lifetimes — respect them.** The first version of this lesson
-had a bug: scoring the *final* point emitted a `serveRequest`, but updates
-stop on gameover, so nobody consumed it. It lingered in the registry and
-hatched a ghost second ball in the next match. Deferred events are powerful,
-but an event nobody consumes doesn't disappear — it waits. When you emit an
-event, always ask: *who consumes this, and what if they never run?*
+- `MenuSystem.keypressed` — SPACE requests the play scene
+- `GameOverSystem.keypressed` — SPACE requests the menu
+- `DebugSystem.keypressed` — B requests an extra ball (main.lua's last
+  entity-touching code, now a proper system)
+- ESC lives in `Game.keypressed`: quitting is a Game concern, not a scene's
 
-## 5. Naming conventions (course-wide from here on)
+A system is now a table with up to five hooks:
+`setup / update / draw / keypressed / unload`.
 
-- Systems are `XxxSystem`, one per file, **file name = module name**
-  (`src/systems/ScoringSystem.lua` returns `ScoringSystem`). Careful:
-  Windows forgives wrong case in filenames, LÖVE's `require` does not —
-  match them exactly or it breaks on someone else's machine.
-- Entity variables: `entity` inside query loops, `ballEntity`-style when
-  holding a specific one. Never call it `id` — say what it is.
-- A table of components ready to spawn is a **prefab** (`matchPrefab`),
-  never a `xxxEntity` — the entity is the *number* `spawn()` returns:
-  `local matchEntity = registry:spawn(matchPrefab)`.
-- Component names are lowercase nouns, unsuffixed: they only ever appear in
-  registry contexts (`spawn` tables, `query`, `get`), where they can't be
-  mistaken for anything else. Anything Uppercase is a module or a system.
-- Modules and globals start uppercase; locals are `camelCase`.
-- `require` everything once, at the top of the file.
+## 6. New responsibility, new system: WinCheckSystem
 
-## 6. The payoff: press B
+`ScoringSystem` awards points. Deciding what a finished match *means* —
+leave the scene, carry the score out — is a different consequence, so it's
+a different system, running right after. This split matters beyond
+cleanliness: win conditions change per game mode (our card battles win by
+HP, dates "win" by affection), while scoring-like bookkeeping stays stable.
+Small systems with one consequence each are cheap to swap.
 
-Pressing B spawns a `serveRequest`, which becomes a ball entity with the same
-components as the first one — and every system picks it up automatically.
-Movement moves it, walls bounce it, paddles hit it, scoring scores it.
-**Zero new logic.** Try adding a second ball to the lesson 01 code and count
-how many places you must touch.
+## 7. The smell we're keeping (on purpose)
 
-This is the property we'll lean on all semester: cards, characters, tiles,
-dialogue portraits — all entities in the same registry, handled by systems
-that don't know about each other.
-
-## 7. What real ECS libraries add
-
-Ours is deliberately minimal. Production ECS (entt, flecs, Bevy) adds:
-archetype storage, cached queries, deferred spawn/despawn, richer event
-plumbing, and parallel system scheduling. Same ideas, more engineering. If
-you can read `Registry.lua`, you can read them.
+Three render systems each create their own fonts in `setup` and drop
+them in `unload`. It works, and the lifecycle is honest — but the
+duplication smells, and loading the same asset every time a scene is
+entered won't survive contact with real sprite sheets. Sit with the smell:
+the **asset cache** lesson is coming, and now you know why it exists.
 
 ## Exercises (for your own game repo)
 
-1. Re-add lesson 01's `"serve"` state (ball frozen until SPACE). Where does
-   that logic belong in this architecture?
-2. Add a `lifetime` component and a system that despawns entities when it
-   expires. Spawn a particle burst (a few tiny short-lived entities) when a
-   point is scored.
-3. `BallSpawnSystem` hard-codes the ball's components. Move them to a data
-   table (a "prefab") so the system just instantiates it. We'll meet this
-   idea again in the data-driven design week.
-4. Our `query()` builds a new table every call, every frame. Measure it with
-   1000 entities. How would you cache it? (Real ECS libraries do exactly this.)
+1. Add a "How to play" scene: reachable from the menu with H, returns with
+   SPACE. Count how many existing files you had to touch (it should be: one
+   new scene file, one new system, one `registerScene` line).
+2. On the gameover screen, add R for an instant rematch (straight to play,
+   skipping the menu). One line — which one, and in which system?
+3. Add a 3-2-1 serve countdown to the play scene: a `countdown` component,
+   a system that ticks it with `dt`, and balls that only move once it hits
+   zero. (Last lesson's "serve state" exercise, scene-flavored.)
+4. Two systems spawn a `switchRequest` on the same frame. What does our
+   Game do? What *should* it do? (Read `Registry:first` before answering.)
 
 ## Next class
 
-`03-RenderSystems-Camera` — system types, drawing images and backgrounds, and
-a simple camera. The game starts looking like *our* game.
+`04` — the card game begins: the real title screen, drawing images from
+files, and the asset cache that kills the font smell.

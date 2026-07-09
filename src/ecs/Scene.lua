@@ -6,15 +6,15 @@
 --
 -- Systems receive the scene, so they can reach the registry (and later,
 -- scene-level things like the camera). A system is a plain table that
--- may implement any of four hooks:
+-- may implement any of five hooks:
 --
---   setup(scene)       once, when the scene starts: create what you own
---   update(scene, dt)  every frame: simulate
---   draw(scene)        every frame: render
---   unload(scene)      when the scene goes away: clean up what you own
+--   setup(scene)          once, when the scene starts: create what you own
+--   update(scene, dt)     every frame: simulate
+--   draw(scene)           every frame: render
+--   keypressed(scene, key) on discrete key presses (menus, debug keys)
+--   unload(scene)         when the scene goes away: clean up what you own
 --
--- For now the game has a single scene; scene switching arrives in a few
--- lessons.
+-- The Game owns the scenes and switches between them; see src/Game.lua.
 
 local Registry = require("src.ecs.Registry")
 
@@ -64,6 +64,14 @@ function Scene:draw()
     for _, system in ipairs(self.systems) do
         if system.draw then
             system.draw(self)
+        end
+    end
+end
+
+function Scene:keypressed(key)
+    for _, system in ipairs(self.systems) do
+        if system.keypressed then
+            system.keypressed(self, key)
         end
     end
 end
