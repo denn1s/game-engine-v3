@@ -26,11 +26,11 @@ function love.load()
     bigFont = love.graphics.newFont(48)
     smallFont = love.graphics.newFont(16)
 
-    local screenW = love.graphics.getWidth()
-    local screenH = love.graphics.getHeight()
+    SCREEN_W = love.graphics.getWidth()
+    SCREEN_H = love.graphics.getHeight()
 
-    leftPaddle = Paddle.new(MARGIN, (screenH - 80) / 2, "w", "s")
-    rightPaddle = Paddle.new(screenW - MARGIN - 14, (screenH - 80) / 2, "up", "down")
+    leftPaddle = Paddle.new(MARGIN, (SCREEN_H - 80) / 2, "w", "s")
+    rightPaddle = Paddle.new(SCREEN_W - MARGIN - 14, (SCREEN_H - 80) / 2, "up", "down")
     paddles = { leftPaddle, rightPaddle }
 
     ball = Ball.new()
@@ -46,12 +46,11 @@ function love.update(dt)
     ball:update(dt, paddles)
 
     -- a point is scored when the ball leaves the screen on either side
-    local screenW = love.graphics.getWidth()
     if ball.x + ball.w < 0 then
         score.right = score.right + 1
         serveDirection = -1 -- loser receives the serve
         EndPoint()
-    elseif ball.x > screenW then
+    elseif ball.x > SCREEN_W then
         score.left = score.left + 1
         serveDirection = 1
         EndPoint()
@@ -82,20 +81,17 @@ function love.keypressed(key)
 end
 
 function love.draw()
-    local screenW = love.graphics.getWidth()
-    local screenH = love.graphics.getHeight()
-
     -- center line
     love.graphics.setColor(1, 1, 1, 0.35)
-    for y = 0, screenH, 30 do
-        love.graphics.rectangle("fill", screenW / 2 - 2, y, 4, 15)
+    for y = 0, SCREEN_H, 30 do
+        love.graphics.rectangle("fill", SCREEN_W / 2 - 2, y, 4, 15)
     end
     love.graphics.setColor(1, 1, 1)
 
     -- score
     love.graphics.setFont(bigFont)
-    love.graphics.printf(tostring(score.left), 0, 20, screenW / 2 - 40, "right")
-    love.graphics.printf(tostring(score.right), screenW / 2 + 40, 20, screenW / 2 - 40, "left")
+    love.graphics.printf(tostring(score.left), 0, 20, SCREEN_W / 2 - 40, "right")
+    love.graphics.printf(tostring(score.right), SCREEN_W / 2 + 40, 20, SCREEN_W / 2 - 40, "left")
 
     leftPaddle:draw()
     rightPaddle:draw()
@@ -103,10 +99,10 @@ function love.draw()
 
     love.graphics.setFont(smallFont)
     if state == "serve" then
-        love.graphics.printf("SPACE to serve", 0, screenH - 40, screenW, "center")
+        love.graphics.printf("SPACE to serve", 0, SCREEN_H - 40, SCREEN_W, "center")
     elseif state == "gameover" then
         local winner = score.left > score.right and "Left" or "Right"
         love.graphics.printf(winner .. " player wins! SPACE to play again",
-            0, screenH - 40, screenW, "center")
+            0, SCREEN_H - 40, SCREEN_W, "center")
     end
 end

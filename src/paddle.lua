@@ -25,9 +25,8 @@ function Paddle:update(dt)
     self.y = self.y + dir * SPEED * dt
 
     -- keep the paddle inside the window
-    local screenH = love.graphics.getHeight()
     if self.y < 0 then self.y = 0 end
-    if self.y + self.h > screenH then self.y = screenH - self.h end
+    if self.y + self.h > SCREEN_H then self.y = SCREEN_H - self.h end
 end
 
 function Paddle:draw()

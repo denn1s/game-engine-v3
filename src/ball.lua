@@ -17,8 +17,8 @@ end
 
 -- Put the ball at the center, serving toward `direction` (1 = right, -1 = left).
 function Ball:reset(direction)
-    self.x = (love.graphics.getWidth() - self.w) / 2
-    self.y = (love.graphics.getHeight() - self.h) / 2
+    self.x = (SCREEN_W - self.w) / 2
+    self.y = (SCREEN_H - self.h) / 2
     self.vx = START_SPEED * direction
     -- random vertical angle so serves aren't identical
     self.vy = START_SPEED * (love.math.random() - 0.5)
@@ -36,12 +36,11 @@ function Ball:update(dt, paddles)
     self.y = self.y + self.vy * dt
 
     -- bounce off top and bottom walls
-    local screenH = love.graphics.getHeight()
     if self.y < 0 then
         self.y = 0
         self.vy = -self.vy
-    elseif self.y + self.h > screenH then
-        self.y = screenH - self.h
+    elseif self.y + self.h > SCREEN_H then
+        self.y = SCREEN_H - self.h
         self.vy = -self.vy
     end
 
