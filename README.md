@@ -1,119 +1,100 @@
-# Lesson 00 — Game Loops
+# Lesson 01 — Pong from scratch (Lab 1)
 
-> PIA week 2 · Branch `00-GameLoops` · Previous: `main`
-
-## Part A — a game loop with no engine
-
-Every game engine, from Pong to Unreal, is built around the same loop:
-
-```
-init
-while running:
-    frame start      (measure time)
-    handle events    (input, window events)
-    update           (simulate the world)
-    render           (draw the world)
-    frame end        (wait / limit frame rate)
-cleanup
-```
-
-A game is a simulation that redraws itself 30–144+ times per second. Each
-pass through the loop is a **frame**. To prove there's no magic, we write one
-in plain Lua, in a terminal, with no engine at all:
-
-```sh
-lua loop.lua
-```
-
-A ball bounces across a line of text at 30 FPS. Read `loop.lua` top to bottom
-— it's the diagram above, literally.
-
-Writing it raw also shows exactly **why engines exist**. Twice we hit a wall:
-
-1. **No input.** A terminal can't portably read keys without blocking the
-   loop. An engine talks to the OS and hands you an event queue.
-2. **No sleep.** Plain Lua can't wait efficiently, so we busy-wait and burn
-   100% of a CPU core to animate one character. Watch `htop` while it runs.
-   An engine asks the OS to sleep the leftover frame time.
-
-(Also missing: a window, graphics, sound, controllers... all of it is "stuff
-around the same loop".)
-
-## Part B — the same loop, inside LÖVE
+> PIA weeks 2–3 · Branch `01-Pong` · Previous: `00-GameLoops`
 
 ```sh
 love .
 ```
 
-In LÖVE we don't write the `while` loop — LÖVE runs it for us, in a function
-called `love.run`, and calls **our** functions at each stage:
+**W/S** and **UP/DOWN** move the paddles, **SPACE** serves. First to 5 wins.
 
-| Loop stage | loop.lua | LÖVE callback |
-|---|---|---|
-| init | top of file | `love.load()` |
-| handle events | *(impossible!)* | `love.keypressed`, `love.mousepressed`, ... |
-| update | `update(dt)` | `love.update(dt)` |
-| render | `render()` | `love.draw()` |
-| frame end | busy-wait | vsync / `love.timer.sleep` |
-| cleanup | bottom of file | `love.quit()` |
+See exactly what we wrote this class:
 
-This is LÖVE's actual background loop, lightly simplified — compare it with
-`loop.lua`, stage by stage:
-
-```lua
-function love.run()
-    love.load()
-    love.timer.step()
-    return function()                       -- called once per frame, forever
-        love.event.pump()                   -- HANDLE EVENTS
-        for name, a, b, c, d, e, f in love.event.poll() do
-            if name == "quit" then return a or 0 end
-            love.handlers[name](a, b, c, d, e, f)
-        end
-        local dt = love.timer.step()        -- FRAME START: measure dt
-        love.update(dt)                     -- UPDATE
-        love.graphics.clear()               -- RENDER
-        love.draw()
-        love.graphics.present()
-        love.timer.sleep(0.001)             -- FRAME END
-    end
-end
+```sh
+git diff 00-GameLoops..01-Pong
 ```
 
-(It's replaceable — you can define your own `love.run` — but we won't need to.)
+## What this lesson covers
 
-## Part C — `dt`, the most important variable in the course
+We go from "a loop that moves squares" to a **complete game**: input,
+movement, collision, scoring, win condition, and restart. Everything the rest
+of the course does is a more organized version of what's in these ~200 lines.
 
-`dt` (delta time) is how many **seconds** the previous frame took. At 60 FPS,
-`dt ≈ 0.0167`. The LÖVE demo has two squares:
+### 1. Splitting code into modules
 
-- **Green:** `x = x + SPEED * dt` → moves `SPEED` pixels per **second**,
-  no matter the frame rate.
-- **Red:** `x = x + PIXELS_PER_FRAME` → moves per **frame**, so its
-  real-world speed changes with the FPS.
+`main.lua` was getting crowded, so the paddle and ball live in their own files:
 
-Press SPACE and cycle the cap: uncapped → 30 → 60 → 144. The green square
-never changes speed. The red one crawls at 30 FPS and rockets when uncapped.
-That red square is a real bug that shipped in real games (it's why some old
-games go crazy on modern PCs).
+```lua
+local Paddle = require("src.paddle")
+```
 
-**Rule for the whole semester: anything that moves or changes over time gets
-multiplied by `dt`.**
+`require("src.paddle")` runs `src/paddle.lua` **once**, caches it, and returns
+whatever that file `return`s. Our modules return a table of functions — that
+table is the module's public API.
 
-Note `conf.lua` turns **vsync** off for this demo. With vsync on (LÖVE's
-default), the GPU driver blocks each frame until the monitor refreshes — a
-built-in frame cap at the refresh rate, which would hide the experiment.
+### 2. Lua "classes" with metatables
+
+Lua doesn't have classes; it has tables and metatables. The idiom:
+
+```lua
+local Paddle = {}
+Paddle.__index = Paddle           -- "if you don't find a key, look in Paddle"
+
+function Paddle.new(x, y)
+    local self = setmetatable({}, Paddle)
+    self.x, self.y = x, y
+    return self
+end
+
+function Paddle:update(dt) ... end -- colon = hidden `self` parameter
+```
+
+Every paddle instance is its own table with its own `x, y`, but they all share
+the same `update`/`draw` functions through the metatable. This pattern carries
+us until lesson 02, where ECS replaces it for game objects.
+
+### 3. Input: polling vs events
+
+- **Polling** (`love.keyboard.isDown("w")`) — asked every frame. Right for
+  *continuous* actions: holding a key to move.
+- **Events** (`love.keypressed(key)`) — fired once per press. Right for
+  *discrete* actions: serving, pausing, restarting.
+
+Using the wrong one is a classic beginner bug (a "jump" that repeats every
+frame while held, or movement that only steps once per press).
+
+### 4. AABB collision
+
+Two axis-aligned rectangles overlap unless one is fully to the left of or
+above the other:
+
+```lua
+a.x < b.x + b.w and b.x < a.x + a.w and
+a.y < b.y + b.h and b.y < a.y + a.h
+```
+
+Two details that separate "works" from "feels right":
+
+- **Push the ball out** of the paddle before reflecting it, or it can get
+  stuck inside, re-colliding every frame.
+- **"English":** the bounce angle depends on where the ball hits the paddle.
+  That single line is what makes Pong a game of skill instead of a screensaver.
+
+### 5. Game states
+
+`state` is `"serve"`, `"play"` or `"gameover"`, and both `update` and `draw`
+branch on it. This is the embryo of the **scene system** we'll build properly
+in a few weeks (menu → overworld → card battle → date scene...).
 
 ## Exercises (for your own game repo)
 
-1. In `loop.lua`: make the ball bounce in 2D (an X and Y position on a grid
-   of lines). Hint: ANSI code `\27[2J\27[H` clears the terminal.
-2. Print `dt` on screen in the LÖVE demo. How stable is it at each cap?
-3. **Challenge — fixed timestep:** make updates run in fixed `1/60` steps
-   using an accumulator (`accum = accum + dt; while accum >= STEP do
-   update(STEP); accum = accum - STEP end`). This is how physics engines stay
-   deterministic. We'll come back to this idea later in the course.
+1. The ball can tunnel through a paddle if it's fast enough (it moves more
+   than a paddle-width in one frame). Why? What are two ways to fix it?
+2. Add a single-player mode: the right paddle follows the ball. Then make it
+   beatable (cap its speed, add reaction delay).
+3. Add a "juice" touch: screen flash on score, or paddles that stretch on hit.
 
 ## Next class
 
-`01-Pong` — we use this loop to build a complete game from scratch.
+`02-ECS` — same Pong, but rebuilt on an Entity-Component-System architecture.
+The game looks identical; the code becomes an engine.
