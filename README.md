@@ -31,9 +31,10 @@ git diff 01-Pong..02-ECS
 
 | Branch | PIA week | Topic |
 |---|---|---|
-| `00-GameLoops` | 2 | Game loops, frame control, `dt`, a custom `love.run` |
+| `00-GameLoops` | 2 | Game loops with no engine at all, frame control, `dt` |
 | `01-Pong` | 2–3 | **Lab 1:** Pong from scratch |
-| `02-ECS` | 3 | **Lab 2:** Pong refactored onto a hand-written ECS |
+| `02-ECS` | 3 | **Lab 2:** Pong on a hand-written ECS: Registry, Scene, Systems, events |
+| `03-Scenes` | 4 | The Game layer: scene factories, deferred switching, payloads |
 
 More branches appear as the semester advances.
 
