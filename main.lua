@@ -8,9 +8,9 @@
 --   Entity     just a number — a key into the registry, nothing more
 --   System     the LOGIC: runs over entities that have certain components
 --
--- Note main.lua doesn't create a single entity: every system spawns
--- what it owns in its setup(). main.lua only assembles the scene and
--- forwards LÖVE's callbacks.
+-- main.lua holds NO game logic: it assembles the scene and forwards
+-- LÖVE's callbacks. Even a key press just becomes a tiny `keyPressed`
+-- entity — the InputSystem consumes it and decides what it means.
 --
 -- W/S and UP/DOWN move the paddles. First to 5 wins.
 -- Press B to spawn extra balls and watch every system handle them
@@ -19,6 +19,7 @@
 
 local Scene = require("src.ecs.Scene")
 
+local InputSystem = require("src.systems.InputSystem")
 local BallSpawnSystem = require("src.systems.BallSpawnSystem")
 local PaddleControlSystem = require("src.systems.PaddleControlSystem")
 local MovementSystem = require("src.systems.MovementSystem")
@@ -33,8 +34,9 @@ local scene
 function love.load()
     scene = Scene.new("pong")
 
-    -- system order IS the frame order: spawn -> input -> simulate ->
-    -- resolve -> score -> draw
+    -- system order IS the frame order: input -> spawn -> control ->
+    -- simulate -> resolve -> score -> draw
+    scene:addSystem(InputSystem)
     scene:addSystem(BallSpawnSystem)
     scene:addSystem(PaddleControlSystem)
     scene:addSystem(MovementSystem)
@@ -48,10 +50,10 @@ function love.load()
 end
 
 function love.update(dt)
-    local _, match = scene.registry:first("match")
-    if match.state == "play" then
-        scene:update(dt)
-    end
+    -- always runs, even on the gameover screen: the InputSystem must
+    -- still see keys there (SPACE restarts). Each simulation system
+    -- guards itself with `if match.state ~= "play" then return end`.
+    scene:update(dt)
 end
 
 function love.draw()
@@ -63,26 +65,5 @@ function love.quit()
 end
 
 function love.keypressed(key)
-    local registry = scene.registry
-    local _, match = registry:first("match")
-
-    if key == "escape" then
-        love.event.quit()
-    elseif key == "b" and match.state == "play" then
-        registry:spawn({
-            serveRequest = { direction = love.math.random() < 0.5 and -1 or 1 },
-        })
-    elseif key == "space" and match.state == "gameover" then
-        match.left, match.right = 0, 0
-        match.state = "play"
-        -- clean the field: balls AND stale serve requests (a B press on
-        -- the match's final frame could leave one behind)
-        for _, ballEntity in ipairs(registry:query("ball")) do
-            registry:destroy(ballEntity)
-        end
-        for _, requestEntity in ipairs(registry:query("serveRequest")) do
-            registry:destroy(requestEntity)
-        end
-        registry:spawn({ serveRequest = { direction = 1 } })
-    end
+    scene.registry:spawn({ keyPressed = { key = key } })
 end

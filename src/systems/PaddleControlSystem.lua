@@ -26,6 +26,8 @@ end
 
 function PaddleControlSystem.update(scene, dt)
     local registry = scene.registry
+    local _, match = registry:first("match")
+    if match.state ~= "play" then return end -- frozen on the gameover screen
 
     for _, entity in ipairs(registry:query("paddle", "velocity")) do
         local paddle = registry:get(entity, "paddle")

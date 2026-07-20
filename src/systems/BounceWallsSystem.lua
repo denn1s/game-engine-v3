@@ -5,6 +5,9 @@ local BounceWallsSystem = {}
 
 function BounceWallsSystem.update(scene, dt)
     local registry = scene.registry
+    local _, match = registry:first("match")
+    if match.state ~= "play" then return end -- frozen on the gameover screen
+
     local screenH = love.graphics.getHeight()
 
     for _, entity in ipairs(registry:query("bounceWalls", "position", "size", "velocity")) do

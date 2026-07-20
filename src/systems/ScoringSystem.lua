@@ -20,6 +20,8 @@ end
 function ScoringSystem.update(scene, dt)
     local registry = scene.registry
     local _, match = registry:first("match")
+    if match.state ~= "play" then return end -- frozen on the gameover screen
+
     local screenW = love.graphics.getWidth()
 
     for _, ballEntity in ipairs(registry:query("ball", "position", "size")) do
@@ -38,8 +40,9 @@ function ScoringSystem.update(scene, dt)
         if serveDirection then
             registry:destroy(ballEntity)
             -- only re-serve if this point didn't end the match: a request
-            -- spawned on the final point would never be consumed (updates
-            -- stop on gameover) and hatch a ghost ball next match
+            -- spawned on the final point would never be consumed (the
+            -- BallSpawnSystem freezes on gameover) and hatch a ghost
+            -- ball next match
             if match.left < match.winScore and match.right < match.winScore then
                 registry:spawn({ serveRequest = { direction = serveDirection } })
             end
