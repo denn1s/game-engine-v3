@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Game Engine Architectures — Where does behavior live?</title>
+<style>
+:root {
+  --bg: #12141a; --panel: #1a1d26; --panel2: #21252f;
+  --text: #e8e6e0; --muted: #9aa0ad; --line: #323847;
+  --accent: #ffb454; --code-bg: #14161d;
+  --k: #ff8f70; --s: #a8cc7a; --c: #6f7787;
+  --good: #7fd08a; --good-bg: #1c2b20; --bad: #ff7a7a; --bad-bg: #2e1d1f;
+  --meh: #ffd479; --meh-bg: #2d2820;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #faf8f4; --panel: #ffffff; --panel2: #f1eee8;
+    --text: #23252b; --muted: #6b7080; --line: #ddd8ce;
+    --accent: #c25e00; --code-bg: #f4f1ea;
+    --k: #ac3e1c; --s: #4a7a1e; --c: #98908d;
+    --good: #256e32; --good-bg: #e3f2e5; --bad: #b02a2a; --bad-bg: #fbe4e4;
+    --meh: #8a6a00; --meh-bg: #f7efd8;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 17px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 960px; margin: 0 auto; padding: 0 24px 120px; }
+h1 { font-size: 2.3rem; line-height: 1.2; margin: 0.5em 0 0.2em; }
+h2 { font-size: 1.7rem; margin-top: 0; }
+h3 { font-size: 1.12rem; margin: 1.8em 0 0.5em; color: var(--accent);
+     text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+p, li { max-width: 72ch; }
+a { color: var(--accent); }
+code {
+  font-family: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  font-size: 0.86em; background: var(--panel2);
+  padding: 1px 6px; border-radius: 5px;
+}
+pre {
+  background: var(--code-bg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 16px 18px; overflow-x: auto;
+  font-size: 0.85rem; line-height: 1.55;
+}
+pre code { background: none; padding: 0; font-size: 1em; }
+pre .k { color: var(--k); } pre .s { color: var(--s); }
+pre .c { color: var(--c); font-style: italic; }
+.subtitle { color: var(--muted); font-size: 1.15rem; max-width: 64ch; }
+
+nav {
+  position: sticky; top: 0; z-index: 10; background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  display: flex; gap: 4px; overflow-x: auto;
+  padding: 10px 16px; margin: 0 -24px 30px;
+}
+nav a {
+  color: var(--muted); text-decoration: none; white-space: nowrap;
+  padding: 5px 12px; border-radius: 999px; font-size: 0.88rem;
+}
+nav a:hover { background: var(--panel2); color: var(--text); }
+nav a b { color: var(--accent); font-weight: 700; }
+
+section.arch {
+  border-top: 3px solid var(--line); margin-top: 70px; padding-top: 34px;
+}
+.arch-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
+.arch-num { font-size: 1rem; color: var(--muted); font-weight: 700; }
+.lives {
+  display: inline-block; background: var(--panel2); border: 1px solid var(--line);
+  border-radius: 999px; padding: 4px 14px; font-size: 0.95rem; margin: 6px 0 2px;
+}
+.lives b { color: var(--accent); }
+.badges { margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.badge {
+  font-size: 0.78rem; padding: 3px 10px; border-radius: 6px;
+  background: var(--panel2); color: var(--muted); border: 1px solid var(--line);
+}
+.run {
+  display: inline-block; font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.88rem; background: var(--panel2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 14px; margin: 6px 0;
+}
+.run::before { content: "$ "; color: var(--muted); }
+
+details {
+  border: 1px solid var(--line); border-radius: 10px;
+  margin: 14px 0; background: var(--panel);
+}
+details summary {
+  cursor: pointer; padding: 13px 18px; font-weight: 600; font-size: 1.02rem;
+  list-style: none; display: flex; gap: 10px; align-items: baseline;
+}
+details summary::before { content: "▸"; color: var(--accent); transition: none; }
+details[open] summary::before { content: "▾"; }
+details .body { padding: 2px 20px 16px; border-top: 1px solid var(--line); }
+details.q-easy { border-left: 4px solid var(--good); }
+details.q-hard { border-left: 4px solid var(--bad); }
+details.q-bike { border-left: 4px solid var(--meh); }
+
+.scorecard { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 20px 0; }
+.scorecard > div { border-radius: 10px; padding: 14px 18px; font-size: 0.95rem; }
+.scorecard .plus { background: var(--good-bg); border: 1px solid var(--good); }
+.scorecard .minus { background: var(--bad-bg); border: 1px solid var(--bad); }
+.scorecard h4 { margin: 0 0 6px; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.scorecard .plus h4 { color: var(--good); } .scorecard .minus h4 { color: var(--bad); }
+.scorecard ul { margin: 0; padding-left: 20px; }
+@media (max-width: 640px) { .scorecard { grid-template-columns: 1fr; } }
+
+.diagram {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 20px; margin: 16px 0; overflow-x: auto;
+}
+.diagram .caption { color: var(--muted); font-size: 0.88rem; margin-top: 12px; }
+pre.tree { border: none; background: none; padding: 0; margin: 0; font-size: 0.87rem; }
+pre.tree .hurt { color: var(--bad); font-weight: 700; }
+pre.tree .nice { color: var(--good); font-weight: 700; }
+pre.tree .dim { color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.chip {
+  font-size: 0.84rem; font-family: ui-monospace, Consolas, monospace;
+  background: var(--panel2); border: 1px solid var(--line);
+  border-radius: 7px; padding: 4px 10px;
+}
+.chip.nice { border-color: var(--good); color: var(--good); background: var(--good-bg); }
+.chip.hurt { border-color: var(--bad); color: var(--bad); background: var(--bad-bg); }
+.dbox {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel2);
+  padding: 12px 16px; margin: 10px 0;
+}
+.dbox > b { display: block; margin-bottom: 4px; }
+.dbox.hurt { border-color: var(--bad); background: var(--bad-bg); }
+.dbox.nice { border-color: var(--good); background: var(--good-bg); }
+.dbox .note { font-size: 0.85rem; color: var(--muted); }
+
+.map { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; margin: 24px 0; }
+.map a {
+  display: block; text-decoration: none; color: var(--text);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 18px;
+}
+.map a:hover { border-color: var(--accent); }
+.map .n { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
+.map .t { font-weight: 700; font-size: 1.05rem; }
+.map .w { color: var(--muted); font-size: 0.9rem; }
+.map .w b { color: var(--accent); }
+
+table.heat { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 20px 0; }
+table.heat th, table.heat td { border: 1px solid var(--line); padding: 9px 12px; text-align: center; }
+table.heat th { background: var(--panel2); }
+table.heat td:first-child, table.heat th:first-child { text-align: left; font-weight: 600; }
+td.E { background: var(--good-bg); color: var(--good); font-weight: 600; }
+td.A { background: var(--meh-bg); color: var(--meh); font-weight: 600; }
+td.P { background: var(--bad-bg); color: var(--bad); font-weight: 600; }
+.table-scroll { overflow-x: auto; }
+
+.callout {
+  border-left: 4px solid var(--accent); background: var(--panel);
+  border-radius: 0 10px 10px 0; padding: 14px 20px; margin: 22px 0;
+}
+.callout.thesis { font-size: 1.08rem; }
+.notice { color: var(--muted); font-size: 0.92rem; }
+.pref { border-bottom: 1px dotted var(--accent); cursor: help; }
+</style>
+</head>
+<body>
+<main>
+
+<nav>
+  <a href="#intro"><b>?</b> Intro</a>
+  <a href="#a1"><b>1</b> Procedural</a>
+  <a href="#a2"><b>2</b> Inheritance</a>
+  <a href="#a3"><b>3</b> Components</a>
+  <a href="#a4"><b>4</b> Events</a>
+  <a href="#a5"><b>5</b> Scene graph</a>
+  <a href="#a6"><b>6</b> ECS</a>
+  <a href="#verdict"><b>⚖</b> Verdict</a>
+  <a href="part2.html"><b>→</b> Part 2</a>
+</nav>
+
+<header id="intro">
+  <h1>Game Engine Architectures</h1>
+  <p class="subtitle">Part 1 — Six answers to one question: <b>where does behavior live?</b></p>
+
+  <p>You just shipped a Breakout with no particular architecture — and it works.
+  So why do engines obsess over architecture? Because games are the software
+  that <em>changes the most</em>: every day of development someone adds a
+  power-up, an enemy, a cutscene, a bicycle. An architecture is a bet about
+  <strong>which changes will be cheap</strong>. Today we look at the six bets
+  the industry has made, in roughly the order it made them — each one born
+  from the previous one's pain.</p>
+
+  <div class="map">
+    <a href="#a1"><span class="n">1 · PROCEDURAL</span><br><span class="t">Just make it work</span><br><span class="w">behavior lives in <b>the update loop</b></span></a>
+    <a href="#a2"><span class="n">2 · INHERITANCE</span><br><span class="t">Everything IS-A</span><br><span class="w">behavior lives in <b>the class</b></span></a>
+    <a href="#a3"><span class="n">3 · COMPONENTS</span><br><span class="t">Everything HAS-A</span><br><span class="w">behavior lives in <b>attached parts</b></span></a>
+    <a href="#a4"><span class="n">4 · EVENTS</span><br><span class="t">Don't call us, we'll call you</span><br><span class="w">behavior lives in <b>subscribers</b></span></a>
+    <a href="#a5"><span class="n">5 · SCENE GRAPH</span><br><span class="t">The game is a tree</span><br><span class="w">behavior lives in <b>nodes</b></span></a>
+    <a href="#a6"><span class="n">6 · ECS</span><br><span class="t">Data in, systems over</span><br><span class="w">behavior lives in <b>systems over data</b></span></a>
+  </div>
+
+  <div class="callout">
+    <p style="margin:0"><strong>How each mini-lesson works.</strong>
+    For every architecture: the idea → the <em>same</em> Pong, rebuilt
+    (<code>lesson/pong/0X-name/</code>, ~150 lines each, only the architecture
+    changes) → the same idea at scale in a Pokémon-style game → and two
+    questions for you: one this architecture <span style="color:var(--good)">breezes through</span>,
+    one that makes it <span style="color:var(--bad)">suffer</span>.
+    Plus one recurring test in every round: <strong>🚲 the bicycle</strong> —
+    the player walks, now add a bicycle that's faster, changes the sprite,
+    and can jump small gaps.</p>
+  </div>
+
+  <p class="notice">Every demo plays identically: <code>W/S</code> and
+  <code>↑/↓</code>, first to 5, <code>SPACE</code> restarts. If two programs
+  behave the same, everything you're about to see is purely about the
+  <em>shape of the code</em>.</p>
+</header>
+
+<!-- ============================================================ 1 -->
+<section class="arch" id="a1">
+  <div class="arch-head"><span class="arch-num">1 / 6</span><h2>Procedural — "just make it work"</h2></div>
+  <span class="lives">behavior lives in <b>the update loop — all of it</b></span>
+  <div class="badges"><span class="badge">every game jam</span><span class="badge">Atari-era games</span><span class="badge">your Breakout, probably</span><span class="badge">PICO-8 carts</span></div>
+
+  <h3>The idea</h3>
+  <p>The game is a bag of variables, mutated top-to-bottom by one update
+  function, once per frame. There is no architecture — and at this size that
+  is honestly <em>fine</em>: it's the fastest path to a working game, you can
+  read the whole frame like a recipe, and every value is one
+  <code>print()</code> away.</p>
+
+  <h3>Pong</h3>
+  <span class="run">love lesson/pong/01-procedural</span>
+<pre><code class="lua">-- ball vs left paddle (AABB, written out longhand)
+if ballVX &lt; 0 and ballX &lt; 42 and ballX &gt; 18
+    and ballY + 12 &gt; leftY and ballY &lt; leftY + 80 then
+    ballX = 42
+    ballVX = -ballVX * 1.06
+    ballVY = ((ballY + 6) - (leftY + 40)) / 40 * 240
+end
+
+-- ball vs right paddle (same thing again — copy, paste, flip)
+if ballVX &gt; 0 and ballX + 12 &gt; 918 and ballX &lt; 942
+    and ballY + 12 &gt; rightY and ballY &lt; rightY + 80 then
+    ...</code></pre>
+  <p>Notice: the state of "a ball" is four loose globals. The <em>idea</em> of
+  a ball exists only in your head. Before you scroll on, try it:
+  <strong>how would we add a second ball?</strong> There is no ball to make
+  another of.</p>
+
+  <h3>The same idea, Pokémon-sized</h3>
+  <div class="diagram">
+    <div class="dbox"><b>battle.lua — 12,000 lines</b>
+      <div class="chips">
+        <span class="chip">doMove()</span>
+        <span class="chip hurt">calcDamage()&nbsp; if id==25 then ... elseif id==26 then ...</span>
+        <span class="chip hurt">drawSprite()&nbsp; if id==25 then ... </span>
+        <span class="chip hurt">canEvolve()&nbsp; if id==25 then ...</span>
+        <span class="chip">drawBattleUI()</span>
+      </div>
+      <div class="note">globals: <code>enemyHP</code>, <code>playerMon</code>, <code>turnPhase</code>, <code>menuDepth</code>, <code>weather</code>, …</div>
+    </div>
+    <div class="caption">What a Pokémon is, is smeared across every function
+    that ever needed to know. Fun fact: Gen 1 Pokémon was close to this —
+    hand-written assembly with data tables, and famously full of bugs
+    (Missingno. is what happens when data and code have no boundary).</div>
+  </div>
+
+  <details class="q-easy"><summary>😌 Easy round: "make Thunderbolt 10% stronger"</summary>
+    <div class="body"><p>One constant, one line, done in 30 seconds. No layers
+    to dig through, no indirection: for <em>tweaks</em>, nothing beats a pile
+    of plain code. This is why jam games and prototypes are written this way —
+    when the whole game changes daily, boundaries just slow you down.</p></div>
+  </details>
+  <details class="q-hard"><summary>😖 Hard round: "add Pokémon #152"</summary>
+    <div class="body"><p>Which files do you touch? <em>All of them.</em> Every
+    <code>if id == ...</code> chain in damage, sprites, evolution, cries, AI —
+    each one grows by a case, and missing one is a silent bug. The content
+    <em>is</em> the code, so adding content means editing everything.
+    151 Pokémon × this = the reason architectures exist.</p></div>
+  </details>
+  <details class="q-bike"><summary>🚲 The bicycle test</summary>
+    <div class="body"><p><code>if onBicycle then ... end</code> — sprinkled
+    into movement, animation, encounter rate, collision ("can't ride
+    indoors"), audio. Each new mode (surfing? running shoes?) multiplies the
+    conditions in every one of those places. Mode × feature = combinatorial
+    scatter.</p></div>
+  </details>
+
+  <div class="scorecard">
+    <div class="plus"><h4>Shines at</h4><ul><li>Speed to first playable — nothing is faster</li><li>Total transparency: the frame reads top to bottom</li><li>Trivial debugging: all state is right there</li></ul></div>
+    <div class="minus"><h4>Breaks at</h4><ul><li>Adding content: data is fused into code</li><li>Two of anything (second ball, second player)</li><li>More than one person editing the file</li></ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ 2 -->
+<section class="arch" id="a2">
+  <div class="arch-head"><span class="arch-num">2 / 6</span><h2>OO Inheritance — "everything IS-A"</h2></div>
+  <span class="lives">behavior lives in <b>the class of each object</b></span>
+  <div class="badges"><span class="badge">Unreal's AActor → APawn → ACharacter</span><span class="badge">late-90s / 2000s C++ engines</span><span class="badge">Java game tutorials forever</span></div>
+
+  <h3>The idea</h3>
+  <p>Objects own their data <em>and</em> their behavior, and share code by
+  inheriting from a parent. This was <strong>the</strong> game architecture
+  for a decade, and it maps beautifully onto how we speak: a Ball
+  <em>is a</em> MovingEntity <em>is an</em> Entity. Now a ball is a real
+  thing: <code>Ball.new()</code> gives you a second one for free.</p>
+
+  <h3>Pong</h3>
+  <span class="run">love lesson/pong/02-inheritance</span>
+<pre><code class="lua">--  Entity                   x, y, w, h — exists, can be drawn
+--  └── MovingEntity         + vx, vy — moves every frame
+--      ├── Paddle           + reads keys, clamps to court
+--      └── Ball             + bounces off walls, speeds up
+
+function Paddle:update(dt)
+    self.vy = 0
+    if love.keyboard.isDown(self.upKey) then self.vy = -360 end
+    if love.keyboard.isDown(self.downKey) then self.vy = 360 end
+    MovingEntity.update(self, dt) -- the "super" call
+    self.y = math.max(0, math.min(540 - self.h, self.y))
+end</code></pre>
+  <p>But look what's still sitting in <code>love.update</code>:</p>
+<pre><code class="lua">-- collision BETWEEN objects belongs to NEITHER class.
+-- It leaks right back into main:
+if ball.vx &lt; 0 and ball:overlaps(leftPaddle) then
+    ball:bounceOff(leftPaddle)
+end</code></pre>
+  <p>Now try to place this: <strong>where does a PowerUp that drifts like a
+  Ball but is steered like a Paddle go?</strong> The hierarchy is a tree.
+  Abilities don't come in trees.</p>
+
+  <h3>The same idea, Pokémon-sized</h3>
+  <div class="diagram">
+<pre class="tree">Pokemon
+├── FirePokemon
+│   └── Charmander ── Charmeleon ── Charizard   <span class="dim">... ×151 leaf classes</span>
+├── WaterPokemon
+│   └── Squirtle ── Wartortle ── Blastoise
+└── ElectricPokemon
+    └── Pikachu ── Raichu
+
+Move
+├── PhysicalMove ── Tackle, Earthquake ...
+├── SpecialMove ── Thunderbolt, Surf ...
+└── StatusMove ── Sleep Powder, Growl ...</pre>
+    <div class="caption">The game modeled by <em>identity</em>: every species
+    is a class, every shared behavior lives in some ancestor. Each Pokémon
+    slots into exactly one branch of the tree.</div>
+  </div>
+
+  <details class="q-easy"><summary>😌 Easy round: "add Raichu, an evolved Pikachu"</summary>
+    <div class="body"><p>Subclass, override the stats and the sprite, inherit
+    everything else. One new file, zero existing files touched. When new
+    content really is "an existing thing, but slightly different,"
+    inheritance is genuinely elegant — that's why UI toolkits still use
+    it.</p></div>
+  </details>
+  <details class="q-hard"><summary>😖 Hard round: "Lanturn is Water AND Electric"</summary>
+    <div class="body"><p>Pick a parent. Duplicate the other type's behavior
+    into it. Now fix the copy every time the original changes. Multiple
+    inheritance "solves" this and brings the diamond problem instead. The
+    deeper issue: <em>type</em> is not identity, it's a property — and
+    properties want to be <strong>composed</strong>, which is the next
+    architecture. (This exact pain is why the industry moved on: see
+    "Evolve Your Hierarchy," the 2007 essay that popularized components.)</p></div>
+  </details>
+  <details class="q-bike"><summary>🚲 The bicycle test</summary>
+    <div class="body"><p><code>BicyclePlayer extends Player</code>? Then
+    mounting means <em>destroying the player object and constructing another
+    one</em>, copying all state across, mid-frame. Add
+    <code>SurfingPlayer</code> and every pair of modes needs a transition.
+    Modes are not identities either.</p></div>
+  </details>
+
+  <div class="scorecard">
+    <div class="plus"><h4>Shines at</h4><ul><li>"Same but different" content via subclassing</li><li>Readable call stacks; behavior next to data</li><li>Matches how designers <em>talk</em> about game objects</li></ul></div>
+    <div class="minus"><h4>Breaks at</h4><ul><li>Combining abilities across branches (class explosion)</li><li>Objects that change nature at runtime</li><li>Cross-object logic still homeless (collision, scoring)</li></ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ 3 -->
+<section class="arch" id="a3">
+  <div class="arch-head"><span class="arch-num">3 / 6</span><h2>Component-based — "everything HAS-A"</h2></div>
+  <span class="lives">behavior lives in <b>component objects attached to game objects</b></span>
+  <div class="badges"><span class="badge">Unity GameObject / MonoBehaviour</span><span class="badge">Unreal ActorComponents</span><span class="badge">GTA's RenderWare (2000s)</span></div>
+
+  <h3>The idea</h3>
+  <p>Kill the hierarchy. A GameObject is an <em>empty shell</em> with a
+  position; you build behavior by <strong>adding parts</strong> — a renderer,
+  a mover, an input reader. Last section's impossible PowerUp is now just a
+  new combination of existing parts. This is Unity's model, and it's the
+  single most-used game architecture in the world.</p>
+
+  <h3>Pong</h3>
+  <span class="run">love lesson/pong/03-components</span>
+<pre><code class="lua">-- composition instead of classes: a paddle IS the sum of its parts
+GameObject.new(scene, "paddle", 30, 230, 12, 80)
+    :addComponent("renderer", RectRenderer())
+    :addComponent("control", KeyboardControl("w", "s"))
+
+GameObject.new(scene, "ball", 474, 264, 12, 12)
+    :addComponent("renderer", RectRenderer())
+    :addComponent("motion", Motion(320, 60))
+    :addComponent("bounce", BounceWalls())
+    :addComponent("ballLogic", BallLogic())</code></pre>
+  <p>Each component still carries its own <code>update()</code> — logic and
+  data travel together, and components find each other by lookup:</p>
+<pre><code class="lua">local function BounceWalls()
+    return {
+        update = function(self)
+            local go = self.gameObject
+            local motion = go:getComponent("motion") -- find my sibling
+            if go.y &lt; 0 then go.y, motion.vy = 0, -motion.vy end
+            ...</code></pre>
+  <p><strong>This is NOT yet ECS</strong> — remember this slide when someone
+  says Unity is an ECS. Three tells: components have methods; each object
+  updates <em>its own</em> parts; components talk through
+  <code>getComponent</code>/<code>findByTag</code> searches. And note who
+  keeps the score in our Pong: an invisible GameObject called
+  <code>manager</code> — the empty-object-with-a-manager-script that every
+  Unity project on Earth contains. Match flow had nowhere to live, so we
+  invented a ghost to haunt it.</p>
+
+  <h3>The same idea, Pokémon-sized</h3>
+  <div class="diagram">
+    <div class="dbox"><b>GameObject "Pikachu"</b>
+      <div class="chips">
+        <span class="chip">Stats</span><span class="chip">Sprite</span>
+        <span class="chip">MoveSet</span><span class="chip">StatusCondition</span>
+        <span class="chip nice">ShinyPalette ← just add it</span>
+      </div>
+    </div>
+    <div class="dbox"><b>GameObject "Trainer Red"</b>
+      <div class="chips"><span class="chip">Sprite</span><span class="chip">Party</span><span class="chip">BattleAI</span><span class="chip">SightLine</span></div>
+    </div>
+    <div class="caption">The game modeled by <em>parts</em>: a Pokémon and a
+    trainer are wildly different things built from the same kit, and each
+    part updates itself. Nothing stops you inventing a new combination —
+    a wild Pokémon that fights back on the overworld is just
+    Stats + Sprite + BattleAI.</div>
+  </div>
+
+  <details class="q-easy"><summary>😌 Easy round: "make this one shiny"</summary>
+    <div class="body"><p>Swap the Sprite component's palette, or attach a
+    <code>ShinyPalette</code> component. No hierarchy to renegotiate, no
+    other object touched. Per-thing variation is where composition earns its
+    keep — this is why Unity's Inspector is drag-and-drop parts.</p></div>
+  </details>
+  <details class="q-hard"><summary>😖 Hard round: "who runs the battle?"</summary>
+    <div class="body"><p>Turn order needs <em>both</em> Pokémon's speed
+    stats. Damage needs the attacker's stats, the defender's types, the
+    weather, and the item slots. No single object owns any of this, so it
+    lands on the invisible BattleManager — a procedural program (architecture
+    #1!) wearing a component as a disguise. Bonus pain: whose
+    <code>update()</code> runs first, and what happens when the answer
+    matters? (Unity's answer is a settings panel called Script Execution
+    Order. Yes, really.)</p></div>
+  </details>
+  <details class="q-bike"><summary>🚲 The bicycle test</summary>
+    <div class="body"><p>Nice: swap <code>WalkMovement</code> for
+    <code>BicycleMovement</code>, swap the sprite component, done — first
+    architecture where the bike is <em>pleasant</em>. Small print: every
+    component that cached <code>getComponent("walkMovement")</code> now
+    holds a dead reference, and gap-jumping needs BicycleMovement to talk to
+    the collision component. Sibling wiring is your job.</p></div>
+  </details>
+
+  <div class="scorecard">
+    <div class="plus"><h4>Shines at</h4><ul><li>Mixing abilities freely — no class explosion</li><li>Per-object variation (designers can compose in an editor)</li><li>Reusable parts across wildly different objects</li></ul></div>
+    <div class="minus"><h4>Breaks at</h4><ul><li>Cross-object rules → god "manager" objects</li><li>Implicit update order between components</li><li>getComponent spaghetti at scale</li></ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ 4 -->
+<section class="arch" id="a4">
+  <div class="arch-head"><span class="arch-num">4 / 6</span><h2>Event-driven — "don't call us, we'll call you"</h2></div>
+  <span class="lives">behavior lives in <b>subscribers</b></span>
+  <div class="badges"><span class="badge">Godot signals</span><span class="badge">Unreal delegates</span><span class="badge">C# events in Unity</span><span class="badge">every UI framework ever</span></div>
+
+  <h3>The idea</h3>
+  <p>Less an architecture, more a <em>dimension that cuts across all the
+  others</em>: instead of A calling B, A announces a fact on a bus and
+  whoever cares reacts. The simulation only <strong>detects</strong>;
+  the rules <strong>react</strong>. The ball does not know scoring exists.
+  Scoring does not know what a ball is.</p>
+
+  <h3>Pong</h3>
+  <span class="run">love lesson/pong/04-events</span>
+<pre><code class="lua">-- the simulation DETECTS and announces. It decides nothing:
+if ball.x &lt; -ball.w then Bus.emit("ball:out", "left") end
+
+-- the rules are REACTIONS, registered elsewhere:
+Bus.on("ball:out", function(side)
+    if side == "left" then match.right = match.right + 1
+    else match.left = match.left + 1 end
+    Bus.emit("match:point", side)   -- chains are normal here
+end)
+
+-- juice, added later, touching NOTHING above:
+Bus.on("ball:paddle", function() flash.time = 0.08 end)
+Bus.on("match:point", function() print("beep!") end)</code></pre>
+  <p>Those last two lines are the whole pitch: screen flash and sound were
+  added <em>without touching the simulation</em>. Now the trap — try
+  answering this yourself: <strong>"what happens when the ball goes
+  out?"</strong> You can't do it by reading top to bottom anymore. One point is a chain:
+  <code>ball:out → match:point → serve</code> or <code>match:over</code>.
+  You don't read event-driven code; you <em>grep</em> it.</p>
+
+  <h3>The same idea, Pokémon-sized</h3>
+  <div class="diagram">
+    <div class="dbox"><b>the event bus</b>
+      <div class="chips"><span class="chip">MoveUsed</span><span class="chip">DamageDealt</span><span class="chip">PokemonFainted</span><span class="chip">TurnEnded</span><span class="chip">WeatherChanged</span></div>
+    </div>
+    <div class="dbox nice"><b>subscribers = the actual game rules</b>
+      <div class="chips">
+        <span class="chip nice">ability Static: on DamageDealt(contact) → 30% paralyze</span>
+        <span class="chip nice">item Focus Sash: on DamageDealt → survive at 1 HP</span>
+        <span class="chip">healthbar UI: on DamageDealt → animate</span>
+        <span class="chip">weather: on TurnEnded → tick</span>
+      </div>
+      <div class="note">Read a real Pokémon ability description. They're all
+      "WHEN X happens, DO Y" — abilities literally ARE event handlers.</div>
+    </div>
+    <div class="caption">The game modeled by <em>reactions</em>: the battle
+    core announces facts, and abilities, items, UI and weather each hang
+    their rule on the bus — none of them knowing the others exist.</div>
+  </div>
+
+  <details class="q-easy"><summary>😌 Easy round: "add the ability Static"</summary>
+    <div class="body"><p>"When hit by a contact move, 30% chance to paralyze
+    the attacker" — that sentence <em>is</em> the code: one subscriber on
+    <code>DamageDealt</code>. No other system touched. Reactive, cross-cutting
+    rules (abilities, items, achievements, tutorials, analytics) are exactly
+    what events are for.</p></div>
+  </details>
+  <details class="q-hard"><summary>😖 Hard round: "why did it faint before the Sash triggered?"</summary>
+    <div class="body"><p>Because the faint-check handler ran before the item
+    handler, and nothing in the code says which comes first. Event systems
+    trade <em>visible</em> control flow for <em>implicit</em> ordering — and
+    cascades (events emitting events emitting events) mean a single wrong
+    order surfaces three reactions later. Sequential logic — a battle turn is
+    strictly sequential! — fights this model. Detect with events; sequence
+    with something else.</p></div>
+  </details>
+  <details class="q-bike"><summary>🚲 The bicycle test</summary>
+    <div class="body"><p>Emit <code>player:mounted</code>; movement, sprite,
+    music each react in their own corner. Decoupled and pretty — but "what
+    does mounting do?" is now answered nowhere. The behavior is smeared
+    across handlers, discoverable only by grep.</p></div>
+  </details>
+
+  <div class="scorecard">
+    <div class="plus"><h4>Shines at</h4><ul><li>Reactive rules: abilities, items, achievements</li><li>Adding juice/UI/audio with zero coupling</li><li>Letting strangers extend the game (mods!)</li></ul></div>
+    <div class="minus"><h4>Breaks at</h4><ul><li>Sequential flow (a battle turn) as a chain of events</li><li>Debugging cascades and handler order</li><li>"Who changed this value?" — someone, somewhere</li></ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ 5 -->
+<section class="arch" id="a5">
+  <div class="arch-head"><span class="arch-num">5 / 6</span><h2>Scene graph — "the game is a tree"</h2></div>
+  <span class="lives">behavior lives in <b>nodes, arranged in a tree</b></span>
+  <div class="badges"><span class="badge">Godot (Node2D/Node3D)</span><span class="badge">Flash display list</span><span class="badge">cocos2d</span><span class="badge">every UI toolkit, again</span></div>
+
+  <h3>The idea</h3>
+  <p>Everything is a Node with a position <em>relative to its parent</em>.
+  Update and draw walk the tree; each node applies its transform before its
+  children draw. Move a parent and its whole subtree moves — <strong>transform
+  propagation</strong>, the superpower here. Behavior = subclass a node and
+  override <code>process()</code>. This is Godot, top to bottom.</p>
+
+  <h3>Pong</h3>
+  <span class="run">love lesson/pong/05-scenegraph</span>
+<pre><code class="lua">root
+├── court                 &lt;- shakes on every paddle hit
+│   ├── leftPaddle ── rect    (in Godot: Sprite2D + CollisionShape2D)
+│   ├── rightPaddle ── rect
+│   └── ball ── rect
+└── ui                    &lt;- NOT under court: doesn't shake
+    ├── leftScore
+    └── rightScore</code></pre>
+<pre><code class="lua">-- the court's ONLY behavior is shaking. Every game object is its
+-- child, so two numbers move the entire world:
+function CourtNode:process(dt)
+    self.shake = math.max(0, self.shake - dt)
+    if self.shake &gt; 0 then
+        self.x = love.math.random(-4, 4)
+        self.y = love.math.random(-4, 4)
+    else
+        self.x, self.y = 0, 0
+    end
+end</code></pre>
+  <p>Run it and hit the ball: the court shakes, the score doesn't. That's an
+  architectural decision expressed as <em>where a node sits in a tree</em> —
+  wonderfully direct. Meanwhile the ball finds the paddles by path,
+  <code>self.parent:get("leftPaddle")</code> — Godot's
+  <code>get_node("../LeftPaddle")</code>, string-typed and one rename away
+  from a crash.</p>
+
+  <h3>The same idea, Pokémon-sized</h3>
+  <div class="diagram">
+<pre class="tree">World
+├── Map ── TallGrass, Ledges, Water
+├── NPCs ── <span class="nice">TrainerJoey (drop-in subtree: Sprite + SightLine + Dialog)</span>
+├── Player ── Sprite, Camera
+└── UI ── Menu, Dialog box</pre>
+    <div class="caption">The game modeled by <em>place</em>: everything on
+    screen is a node, positioned relative to its parent. The camera rides
+    the player, dialog boxes ride the UI branch, and a trainer is a reusable
+    subtree you can drop onto any map.</div>
+  </div>
+
+  <details class="q-easy"><summary>😌 Easy round: "add a trainer to route 30"</summary>
+    <div class="body"><p>Build the trainer once as a subtree (sprite +
+    sight-line + dialog), save it as a reusable scene, and drop instances
+    anywhere on any map. Composition <em>of trees</em> is Godot's whole
+    workflow, and it's a genuinely great way to build worlds and UI — spatial
+    things, made of spatial parts.</p></div>
+  </details>
+  <details class="q-hard"><summary>😖 Hard round: "where does the party live?"</summary>
+    <div class="body"><p>Six Pokémon that exist while walking, battling, in
+    menus, and across save files — but are drawn in none of those places.
+    They have no position, no parent, no visual: the tree has no natural slot
+    for pure state. Every scene-graph engine sprouts a global-state
+    escape hatch (autoloads in Godot, DontDestroyOnLoad in Unity) — which is
+    the architecture admitting the model doesn't cover everything.</p></div>
+  </details>
+  <details class="q-bike"><summary>🚲 The bicycle test</summary>
+    <div class="body"><p>Swap the Sprite child, keep the Player node.
+    Decent — but speed and gap-jumping live in the Player's
+    <code>process()</code>, so modes end up as <code>if bicycle</code> flags
+    inside one script (hello, architecture #1) or as swapping behavior-nodes
+    in and out of the tree at runtime.</p></div>
+  </details>
+
+  <div class="scorecard">
+    <div class="plus"><h4>Shines at</h4><ul><li>Anything spatial: camera shake, attach, parent/unparent</li><li>Building worlds & UI from reusable sub-scenes</li><li>Draw order and grouping fall out for free</li></ul></div>
+    <div class="minus"><h4>Breaks at</h4><ul><li>Non-visual state (inventory, progress) has no home</li><li>Cross-branch logic → string paths everywhere</li><li>Deep trees hide "who moves whom"</li></ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ 6 -->
+<section class="arch" id="a6">
+  <div class="arch-head"><span class="arch-num">6 / 6</span><h2>ECS — "entities have data, systems do things"</h2></div>
+  <span class="lives">behavior lives in <b>systems that run over data</b></span>
+  <div class="badges"><span class="badge">entt / flecs (C++)</span><span class="badge">Bevy (Rust)</span><span class="badge">Unity DOTS</span><span class="badge">Overwatch</span><span class="badge">the rest of this course</span></div>
+
+  <h3>The idea</h3>
+  <p>Looks like components, but <strong>flips who is in charge</strong>.
+  Components become <em>plain data</em> — no methods, no update, just tables.
+  An entity is just a number: a key into the component stores. And ALL logic
+  moves into <strong>systems</strong>, each of which queries "every entity
+  with components X and Y" and processes them in bulk. Architecture #3 asks
+  "what does <em>this object</em> do this frame?" ECS asks "what does the
+  <em>movement rule</em> do to <em>everything</em>, this frame?"</p>
+
+  <h3>Pong</h3>
+  <span class="run">love lesson/pong/06-ecs</span>
+<pre><code class="lua">-- a paddle is not a class: it's this recipe of components
+registry.spawn({
+    position = { x = 30, y = 230 }, size = { w = 12, h = 80 },
+    velocity = { vx = 0, vy = 0 },
+    paddle = { upKey = "w", downKey = "s" },
+})
+
+-- moves ANYTHING with position + velocity — paddles, balls,
+-- and every entity you haven't invented yet:
+local function movementSystem(dt)
+    for _, entity in ipairs(registry.query("position", "velocity")) do
+        local position = registry.get(entity, "position")
+        local velocity = registry.get(entity, "velocity")
+        position.x = position.x + velocity.vx * dt
+        position.y = position.y + velocity.vy * dt
+    end
+end</code></pre>
+  <p><strong>The demo: press B during play.</strong> Each press spawns
+  another ball — and movement moves it, walls bounce it, paddles hit it,
+  scoring scores it, with <em>zero new code</em>. Now flip back to
+  architecture #1, where a second ball was unthinkable. Same game. That gap
+  is what an architecture buys. (Systems never call each other — they meet
+  only through the data. And storing "all positions together" is the
+  data-oriented, cache-friendly layout that makes ECS fast in C++ — same
+  shape you'll see in entt.)</p>
+
+  <h3>The same idea, Pokémon-sized</h3>
+  <div class="diagram">
+    <div class="dbox"><b>the registry (overworld)</b>
+      <div class="chips">
+        <span class="chip">position[ ]</span><span class="chip">sprite[ ]</span>
+        <span class="chip">encounterZone[ ]</span><span class="chip">sightLine[ ]</span>
+        <span class="chip">player[ ]</span><span class="chip nice">bicycle[ ] ← one new store</span>
+      </div>
+    </div>
+    <div class="dbox nice"><b>systems</b>
+      <div class="chips">
+        <span class="chip">MovementSystem</span><span class="chip">EncounterSystem</span>
+        <span class="chip">TrainerSightSystem</span><span class="chip">AnimationSystem</span>
+        <span class="chip nice">BicycleSystem ← one new system</span>
+      </div>
+      <div class="note">500 NPCs, 3,000 tiles of grass, particles — bulk
+      processing of uniform stuff is ECS's home turf.</div>
+    </div>
+    <div class="caption">The game modeled by <em>data</em>: the overworld is
+    component stores plus a handful of systems, and a new mechanic is one
+    new store and one new system — every existing system carries on
+    untouched.</div>
+  </div>
+
+  <details class="q-easy"><summary>😌 Easy round: 🚲 the bicycle — finally at home</summary>
+    <div class="body"><p>Add a <code>bicycle</code> component to the player;
+    a <code>BicycleSystem</code> adjusts speed and handles gap-jumps; the
+    animation system queries it to pick the sprite. Dismount = remove the
+    component. Surfing? A <code>surf</code> component, same recipe —
+    modes compose instead of multiplying. This is the pattern you'll use for
+    cards, buffs, and status effects all semester.</p></div>
+  </details>
+  <details class="q-hard"><summary>😖 Hard round: "add one more trainer battle"</summary>
+    <div class="body"><p>The battle is sequential flow, menus, and script —
+    two combatants, no bulk, nothing to query. Forcing it into systems gives
+    you systems-of-one that secretly form a state machine. The honest answer:
+    <em>don't force it</em>. The overworld is a great ECS scene; the battle
+    is a different scene, better served by a state machine over plain data
+    tables. Which raises the real question: <strong>can one game mix
+    architectures?</strong> Every shipped one does — that's next class.</p></div>
+  </details>
+
+  <div class="scorecard">
+    <div class="plus"><h4>Shines at</h4><ul><li>Ability/mode composition: add a component, add a system</li><li>Crowds of uniform things — and cache-friendly speed</li><li>New content = new data, not new code paths</li></ul></div>
+    <div class="minus"><h4>Breaks at</h4><ul><li>Sequential flow: turns, menus, cutscenes</li><li>"What does the player do?" is smeared across systems</li><li>Ordering bugs between systems (you'll meet these in the lab)</li></ul></div>
+  </div>
+
+  <div class="callout">
+    <p style="margin:0">📺 <strong>Assigned watching:</strong>
+    <a href="https://www.youtube.com/watch?v=8QHHVpBiG-I">Overwatch Gameplay
+    Architecture and Netcode</a> (GDC 2017) — a shipped AAA game on real ECS.
+    Watch for how much of the talk is about <em>discipline</em>: system
+    ordering, where "manager" logic is allowed to live, and what they do when
+    something doesn't fit the model.</p>
+  </div>
+</section>
+
+<!-- ====================================================== verdict -->
+<section class="arch" id="verdict">
+  <div class="arch-head"><span class="arch-num">⚖</span><h2>The verdict</h2></div>
+
+  <p>Same Pong, six shapes. Here's the whole lesson in one table — each
+  column is a <em>kind of change</em>, each cell is how much that change
+  hurts:</p>
+
+  <div class="table-scroll">
+  <table class="heat">
+    <tr><th>architecture</th><th>tweak a value</th><th>add content<br>(#152)</th><th>combine abilities<br>(🚲 bicycle)</th><th>cross-cutting rules<br>(battle flow)</th><th>follow the<br>control flow</th><th>1000 things<br>on screen</th></tr>
+    <tr><td>1 · Procedural</td><td class="E">easy</td><td class="P">painful</td><td class="P">painful</td><td class="A">awkward</td><td class="E">easy</td><td class="P">painful</td></tr>
+    <tr><td>2 · Inheritance</td><td class="E">easy</td><td class="A">awkward</td><td class="P">painful</td><td class="A">awkward</td><td class="E">easy</td><td class="A">awkward</td></tr>
+    <tr><td>3 · Components</td><td class="E">easy</td><td class="E">easy</td><td class="E">easy</td><td class="P">painful</td><td class="A">awkward</td><td class="A">awkward</td></tr>
+    <tr><td>4 · Events</td><td class="E">easy</td><td class="A">awkward</td><td class="E">easy</td><td class="A">awkward</td><td class="P">painful</td><td class="A">awkward</td></tr>
+    <tr><td>5 · Scene graph</td><td class="E">easy</td><td class="E">easy</td><td class="A">awkward</td><td class="A">awkward</td><td class="E">easy</td><td class="A">awkward</td></tr>
+    <tr><td>6 · ECS</td><td class="E">easy</td><td class="E">easy</td><td class="E">easy</td><td class="P">painful</td><td class="A">awkward</td><td class="E">easy</td></tr>
+  </table>
+  </div>
+
+  <p>Read the rows and notice two things. First: <strong>no row is all
+  green.</strong> Not even ECS — an architecture is a bet about which
+  changes will be cheap, and every bet loses somewhere. Anyone who tells you
+  their architecture has no red cells hasn't shipped with it yet.</p>
+
+  <p>Second: the columns don't compete — a real game needs several of them
+  cheap <em>at once</em>, in different places. Overworld: crowds and
+  composition → ECS. Abilities and items: reactions → events. UI and camera:
+  spatial trees → scene graph. Battle flow: sequential → a plain state
+  machine. Which is why…</p>
+
+  <div class="callout thesis">
+    <strong>Every shipped engine is a hybrid.</strong> Unity = components +
+    events + a scene tree + optional ECS (DOTS). Unreal = deep inheritance +
+    components + delegates + a data-driven scripting layer (Blueprints).
+    Godot = scene graph + signals — and a written manifesto on why it
+    <em>rejects</em> ECS. In <a href="part2.html">Part 2</a> we dissect all
+    three as compositions of what you learned today: which paradigms they
+    mixed, why, and what each bet cost them.
+  </div>
+
+  <p><strong>And your lab:</strong> you'll rebuild your Breakout on ECS —
+  bricks, balls, power-ups: crowds of uniform things with composable
+  abilities. Look at the table: that's the green column territory. Now you
+  know <em>why</em> it's the right tool for that job — and you'll know when
+  it isn't.</p>
+
+  <p class="notice">Demos: <code>lesson/pong/01-procedural</code> …
+  <code>06-ecs</code> — run each with <code>love lesson/pong/0X-...</code>.
+  Every file is ~150 lines and heavily commented; read them side by side.
+  Further reading: "Evolve Your Hierarchy" (West, 2007) ·
+  <em>Game Programming Patterns</em>, "Component" (Nystrom) ·
+  "Why isn't Godot an ECS-based game engine?" (Linietsky, 2021) ·
+  <a href="https://www.youtube.com/watch?v=8QHHVpBiG-I">GDC: "Overwatch
+  Gameplay Architecture and Netcode" (2017)</a> — assigned watching.</p>
+</section>
+
+</main>
+<script>
+// tiny Lua highlighter for the snippets
+document.querySelectorAll("pre code.lua").forEach(function (block) {
+  var src = block.textContent
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  block.innerHTML = src.replace(
+    /(--[^\n]*)|("(?:[^"\\]|\\.)*")|\b(function|local|if|then|else|elseif|end|for|in|do|while|return|and|or|not|break|true|false|nil)\b/g,
+    function (m, comment, str, kw) {
+      if (comment) return '<span class="c">' + comment + "</span>";
+      if (str) return '<span class="s">' + str + "</span>";
+      return '<span class="k">' + kw + "</span>";
+    });
+});
+
+// hover tooltips: every "#N" reference names its architecture
+var PARADIGMS = {
+  1: "#1 procedural — behavior lives in the update loop",
+  2: "#2 OO inheritance — behavior lives in the class",
+  3: "#3 components — behavior lives in attached parts",
+  4: "#4 events — behavior lives in subscribers",
+  5: "#5 scene graph — behavior lives in nodes",
+  6: "#6 ECS — behavior lives in systems over data",
+};
+var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+  acceptNode: function (node) {
+    if (node.parentElement.closest("script, style, nav"))
+      return NodeFilter.FILTER_REJECT;
+    // #N not followed by a digit (so "Pokémon #152" stays untouched)
+    return /#[1-6](?![0-9])/.test(node.nodeValue)
+      ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+  },
+});
+var refs = [];
+while (walker.nextNode()) refs.push(walker.currentNode);
+refs.forEach(function (node) {
+  var frag = document.createDocumentFragment();
+  node.nodeValue.split(/(#[1-6])(?![0-9])/).forEach(function (part) {
+    var m = part.match(/^#([1-6])$/);
+    if (m) {
+      var span = document.createElement("span");
+      span.className = "pref";
+      span.title = PARADIGMS[m[1]];
+      span.textContent = part;
+      frag.appendChild(span);
+    } else {
+      frag.appendChild(document.createTextNode(part));
+    }
+  });
+  node.parentNode.replaceChild(frag, node);
+});
+</script>
+</body>
+</html>

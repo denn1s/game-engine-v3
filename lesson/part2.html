@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Game Engine Architectures, Part 2 — How real engines mix them</title>
+<style>
+:root {
+  --bg: #12141a; --panel: #1a1d26; --panel2: #21252f;
+  --text: #e8e6e0; --muted: #9aa0ad; --line: #323847;
+  --accent: #ffb454; --code-bg: #14161d;
+  --k: #ff8f70; --s: #a8cc7a; --c: #6f7787;
+  --good: #7fd08a; --good-bg: #1c2b20; --bad: #ff7a7a; --bad-bg: #2e1d1f;
+  --meh: #ffd479; --meh-bg: #2d2820;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #faf8f4; --panel: #ffffff; --panel2: #f1eee8;
+    --text: #23252b; --muted: #6b7080; --line: #ddd8ce;
+    --accent: #c25e00; --code-bg: #f4f1ea;
+    --k: #ac3e1c; --s: #4a7a1e; --c: #98908d;
+    --good: #256e32; --good-bg: #e3f2e5; --bad: #b02a2a; --bad-bg: #fbe4e4;
+    --meh: #8a6a00; --meh-bg: #f7efd8;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 17px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 960px; margin: 0 auto; padding: 0 24px 120px; }
+h1 { font-size: 2.3rem; line-height: 1.2; margin: 0.5em 0 0.2em; }
+h2 { font-size: 1.7rem; margin-top: 0; }
+h3 { font-size: 1.12rem; margin: 1.8em 0 0.5em; color: var(--accent);
+     text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+p, li { max-width: 72ch; }
+a { color: var(--accent); }
+code {
+  font-family: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  font-size: 0.86em; background: var(--panel2);
+  padding: 1px 6px; border-radius: 5px;
+}
+pre {
+  background: var(--code-bg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 16px 18px; overflow-x: auto;
+  font-size: 0.85rem; line-height: 1.55;
+}
+pre code { background: none; padding: 0; font-size: 1em; }
+pre .k { color: var(--k); } pre .s { color: var(--s); }
+pre .c { color: var(--c); font-style: italic; }
+.subtitle { color: var(--muted); font-size: 1.15rem; max-width: 64ch; }
+
+nav {
+  position: sticky; top: 0; z-index: 10; background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  display: flex; gap: 4px; overflow-x: auto;
+  padding: 10px 16px; margin: 0 -24px 30px;
+}
+nav a {
+  color: var(--muted); text-decoration: none; white-space: nowrap;
+  padding: 5px 12px; border-radius: 999px; font-size: 0.88rem;
+}
+nav a:hover { background: var(--panel2); color: var(--text); }
+nav a b { color: var(--accent); font-weight: 700; }
+
+section.arch {
+  border-top: 3px solid var(--line); margin-top: 70px; padding-top: 34px;
+}
+.arch-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
+.arch-num { font-size: 1rem; color: var(--muted); font-weight: 700; }
+.lives {
+  display: inline-block; background: var(--panel2); border: 1px solid var(--line);
+  border-radius: 999px; padding: 4px 14px; font-size: 0.95rem; margin: 6px 0 2px;
+}
+.lives b { color: var(--accent); }
+.badges { margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.badge {
+  font-size: 0.78rem; padding: 3px 10px; border-radius: 6px;
+  background: var(--panel2); color: var(--muted); border: 1px solid var(--line);
+}
+.run {
+  display: inline-block; font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.88rem; background: var(--panel2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 14px; margin: 6px 0;
+}
+.run::before { content: "$ "; color: var(--muted); }
+
+details {
+  border: 1px solid var(--line); border-radius: 10px;
+  margin: 14px 0; background: var(--panel);
+}
+details summary {
+  cursor: pointer; padding: 13px 18px; font-weight: 600; font-size: 1.02rem;
+  list-style: none; display: flex; gap: 10px; align-items: baseline;
+}
+details summary::before { content: "▸"; color: var(--accent); }
+details[open] summary::before { content: "▾"; }
+details .body { padding: 2px 20px 16px; border-top: 1px solid var(--line); }
+details.q { border-left: 4px solid var(--accent); }
+
+.scorecard { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 20px 0; }
+.scorecard > div { border-radius: 10px; padding: 14px 18px; font-size: 0.95rem; }
+.scorecard .plus { background: var(--good-bg); border: 1px solid var(--good); }
+.scorecard .minus { background: var(--bad-bg); border: 1px solid var(--bad); }
+.scorecard h4 { margin: 0 0 6px; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.scorecard .plus h4 { color: var(--good); } .scorecard .minus h4 { color: var(--bad); }
+.scorecard ul { margin: 0; padding-left: 20px; }
+@media (max-width: 640px) { .scorecard { grid-template-columns: 1fr; } }
+
+.diagram {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 20px; margin: 16px 0; overflow-x: auto;
+}
+.diagram .caption { color: var(--muted); font-size: 0.88rem; margin-top: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.chip {
+  font-size: 0.84rem; font-family: ui-monospace, Consolas, monospace;
+  background: var(--panel2); border: 1px solid var(--line);
+  border-radius: 7px; padding: 4px 10px;
+}
+.chip.nice { border-color: var(--good); color: var(--good); background: var(--good-bg); }
+.chip.hurt { border-color: var(--bad); color: var(--bad); background: var(--bad-bg); }
+.dbox {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel2);
+  padding: 12px 16px; margin: 10px 0;
+}
+.dbox > b { display: block; margin-bottom: 4px; }
+.dbox.hurt { border-color: var(--bad); background: var(--bad-bg); }
+.dbox.nice { border-color: var(--good); background: var(--good-bg); }
+.dbox .note { font-size: 0.85rem; color: var(--muted); }
+.pnum {
+  display: inline-block; font-size: 0.75rem; font-weight: 700;
+  background: var(--panel); border: 1px solid var(--accent); color: var(--accent);
+  border-radius: 999px; padding: 1px 9px; margin-left: 6px; vertical-align: middle;
+  white-space: nowrap; cursor: help;
+}
+.pref { border-bottom: 1px dotted var(--accent); cursor: help; }
+
+table.heat { border-collapse: collapse; width: 100%; font-size: 0.88rem; margin: 20px 0; }
+table.heat th, table.heat td { border: 1px solid var(--line); padding: 9px 12px; text-align: center; }
+table.heat th { background: var(--panel2); }
+table.heat td:first-child, table.heat th:first-child { text-align: left; font-weight: 600; white-space: nowrap; }
+td.core { background: var(--good-bg); color: var(--good); font-weight: 700; }
+td.dim { color: var(--muted); }
+.table-scroll { overflow-x: auto; }
+
+.timeline { list-style: none; margin: 14px 0; padding: 4px 0 4px 10px; border-left: 2px solid var(--line); }
+.timeline li { margin: 0 0 16px 20px; position: relative; max-width: 68ch; }
+.timeline li:last-child { margin-bottom: 4px; }
+.timeline li::before {
+  content: ""; position: absolute; left: -35px; top: 9px;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--bg);
+}
+.timeline .yr {
+  font-family: ui-monospace, Consolas, monospace; font-weight: 700;
+  color: var(--accent); margin-right: 8px;
+}
+.timeline .why { display: block; color: var(--muted); font-size: 0.9rem; }
+
+.callout {
+  border-left: 4px solid var(--accent); background: var(--panel);
+  border-radius: 0 10px 10px 0; padding: 14px 20px; margin: 22px 0;
+}
+.callout.thesis { font-size: 1.08rem; }
+.notice { color: var(--muted); font-size: 0.92rem; }
+</style>
+</head>
+<body>
+<main>
+
+<nav>
+  <a href="index.html"><b>←</b> Part 1</a>
+  <a href="#recap"><b>↻</b> Recap</a>
+  <a href="#layers"><b>▤</b> Layer cake</a>
+  <a href="#unity"><b>U</b> Unity</a>
+  <a href="#unreal"><b>UE</b> Unreal</a>
+  <a href="#godot"><b>G</b> Godot</a>
+  <a href="#rosetta"><b>=</b> Rosetta stone</a>
+  <a href="#pokemon"><b>◓</b> Pokémon, shipped</a>
+  <a href="#lab"><b>⚗</b> Your lab</a>
+</nav>
+
+<header id="recap">
+  <h1>Game Engine Architectures</h1>
+  <p class="subtitle">Part 2 — Every shipped engine is a hybrid: Unity, Unreal
+  and Godot as <b>compositions</b> of what you already know.</p>
+
+  <p>Last class ended on a table with no all-green row: every paradigm is bad
+  at something. Six paradigms, six bets:</p>
+
+  <div class="chips" style="margin: 14px 0 18px">
+    <span class="chip">#1 procedural — the update loop</span>
+    <span class="chip">#2 inheritance — the class</span>
+    <span class="chip">#3 components — attached parts</span>
+    <span class="chip">#4 events — subscribers</span>
+    <span class="chip">#5 scene graph — the tree</span>
+    <span class="chip">#6 ECS — systems over data</span>
+  </div>
+
+  <p>So what does a team betting <em>hundreds of engineer-years</em> do?
+  They don't pick one. They pick a <strong>core bet</strong> — the paradigm
+  the whole engine is organized around — then layer the others on where the
+  core is weak, and cut an <strong>escape hatch</strong> for whatever still
+  doesn't fit. Today we dissect the three engines you've used as exactly
+  that: a core, layers, and escape hatches. Once you see the pattern, their
+  weirdest features stop being arbitrary — they're patches over some
+  paradigm's red cell.</p>
+
+  <div class="callout">
+    <p style="margin:0"><strong>One new ingredient first.</strong> All three
+    engines lean hard on something Part 1 only brushed against:
+    <strong>data-driven design</strong> — content lives in <em>data files</em>
+    (prefabs, Blueprints, scenes, tables) that non-programmers create and
+    edit, and the code just instantiates them. It's not a seventh place for
+    behavior to live; it's the answer to the "Pokémon #152" column: adding
+    content should mean adding <em>data</em>, never code. Watch how each
+    engine builds its whole editor around this idea.</p>
+  </div>
+</header>
+
+<!-- ==================================================== LAYER CAKE -->
+<section class="arch" id="layers">
+  <div class="arch-head"><span class="arch-num">▤</span><h2>Under the fancy UI: the layer cake</h2></div>
+
+  <p>Before dissecting each engine, strip away the editor, the gizmos, the
+  profilers. What is actually <em>running</em> when you press Play? Every
+  engine on this page — and yours — is the same four-layer cake:</p>
+
+  <div class="diagram">
+<pre class="tree">                 ┌─ THE EDITOR ─────────────────────────┐
+                 │ a separate program! It uses the same  │
+                 │ engine to draw its viewport, and its  │
+                 │ real job is writing the data files →  │
+                 └───────────────────────────────────────┘
+┌────────────────────────────────┐      ┌────────────────────────┐
+│ 4 YOUR GAME                    │ ←──  │ DATA FILES             │
+│   scripts, gameplay rules      │ load │ prefabs, .tscn, tables │
+├────────────────────────────────┤      └────────────────────────┘
+│ 3 OBJECT MODEL                 │  GameObjects / Actors / Nodes —
+│   <span class="nice">the paradigms live here</span>      │  everything Part 1 was about
+├────────────────────────────────┤
+│ 2 NATIVE CORE                  │  the loop, renderer, physics,
+│   C/C++, performance-critical  │  audio, asset loading
+├────────────────────────────────┤
+│ 1 PLATFORM                     │  OS, SDL, Vulkan/GL/DirectX
+└────────────────────────────────┘</pre>
+    <div class="caption">The frame loop from lesson 00 — <code>while true:
+    input, update, draw</code> — still exists in every one of these engines.
+    It just lives in layer 2 now, and calls <em>you</em>: that inversion of
+    control is the single biggest difference between using a library and
+    using an engine.</div>
+  </div>
+
+  <p>And here's the part that should make this course click:
+  <strong>you already own most of this cake.</strong> LÖVE <em>is</em>
+  layers 1–2 (SDL and a C++ core with the loop, calling your
+  <code>love.update</code>), Lua is layer 4 — and layer 3, the object
+  model, is exactly what you've been building by hand: the registry, the
+  scene, the systems. An engine is not magic. It's this diagram with more
+  engineers.</p>
+
+  <p>What differs per engine is <em>how layer 3 is built and how layers talk</em>
+  — so each section below now ends with that engine's cake, under the hood.</p>
+</section>
+
+<!-- ======================================================== UNITY -->
+<section class="arch" id="unity">
+  <div class="arch-head"><span class="arch-num">ENGINE 1/3</span><h2>Unity — the composition bet</h2></div>
+  <span class="lives">core bet: <b>components (#3)</b>, made in 2005</span>
+  <div class="badges"><span class="badge">Hollow Knight</span><span class="badge">Cuphead</span><span class="badge">Among Us</span><span class="badge">~⅔ of mobile games</span></div>
+
+  <h3>The bet</h3>
+  <p>Unity launched in 2005, when the industry standard was Unreal-style C++
+  inheritance — and it bet against that standard on two ideas: behavior comes
+  from <strong>attaching parts, not deriving classes</strong> (Part 1's
+  architecture #3, almost verbatim), and the <strong>editor is the
+  engine</strong> — designers compose GameObjects by drag-and-drop, save them
+  as prefabs (data-driven!), and never see a compiler. That accessibility bet
+  is why Unity, not Unreal, ate the indie and mobile world.</p>
+
+  <h3>How it grew</h3>
+  <p>Watch the pattern: every addition below is a patch over a specific pain
+  the core bet couldn't handle.</p>
+  <ul class="timeline">
+    <li><span class="yr">2005</span><b>Unity 1.0</b> ships — Mac-only! — with
+      the core bet already whole: GameObjects, attachable scripts, compose in
+      the editor, prefabs making content data-driven from day one.
+      <span class="pnum">#3 + data-driven</span></li>
+    <li><span class="yr">2008</span><b>Unity iPhone</b> — the accessibility
+      bet meets the App Store. The mobile explosion funds everything that
+      follows.
+      <span class="why">Not an architecture change — but it's why this
+      architecture became the world's default.</span></li>
+    <li><span class="yr">~2010s</span><b>the folklore layer</b> — GameManager
+      objects and the Script Execution Order panel become standard practice.
+      <span class="pnum">#1 leaks in</span>
+      <span class="why">Pain: cross-object rules and update ordering have no
+      home in pure composition. The community patched it with conventions
+      before Unity patched it with features.</span></li>
+    <li><span class="yr">2014</span><b>UnityEvents</b> ship with the new UI
+      system: designers wire reactions in the Inspector, no code.
+      <span class="pnum">#4 events</span>
+      <span class="why">Pain: "when X happens, do Y" kept requiring a
+      programmer.</span></li>
+    <li><span class="yr">2017</span><b>DOTS announced</b> ("performance by
+      default").
+      <span class="pnum">#6 ECS</span>
+      <span class="why">Pain: MonoBehaviour's per-object updates hit a hard
+      ceiling on crowds and simulation-heavy games.</span></li>
+    <li><span class="yr">2023</span><b>Entities 1.0</b> finally lands — six
+      years after the announcement, opt-in, not core.
+      <span class="why">Retrofitting a paradigm into an ecosystem takes
+      longer than building the ecosystem did.</span></li>
+  </ul>
+
+  <h3>The composition</h3>
+  <div class="diagram">
+    <div class="dbox nice"><b>the core: GameObject + MonoBehaviour <span class="pnum">#3 components</span></b>
+      <div class="note">An empty shell + attachable scripts, each with its own
+      <code>Update()</code>. Our <code>lesson/pong/03-components</code> is a
+      100-line Unity.</div>
+    </div>
+    <div class="dbox"><b>layered on top</b>
+      <div class="chips">
+        <span class="chip">Transform parent/child <span class="pnum">#5 tree</span></span>
+        <span class="chip">UnityEvents, C# events <span class="pnum">#4 events</span></span>
+        <span class="chip">prefabs, ScriptableObjects <span class="pnum">data-driven</span></span>
+      </div>
+    </div>
+    <div class="dbox"><b>the escape hatches</b>
+      <div class="chips">
+        <span class="chip">"GameManager" scripts <span class="pnum">#1 procedural</span></span>
+        <span class="chip">DOTS / Entities <span class="pnum">#6 ECS</span></span>
+      </div>
+      <div class="note">Flow logic on invisible objects; and a whole optional
+      ECS for when composition hits its performance ceiling.</div>
+    </div>
+  </div>
+
+  <h3>Under the hood</h3>
+  <p>Unity's secret is that it's <strong>two programs</strong>: a closed-source
+  C++ engine, and your C# code running in a VM beside it — with a bridge in
+  between that every call crosses.</p>
+  <div class="diagram">
+<pre class="tree">┌─ C# WORLD (Mono VM, or IL2CPP AOT) ───────────────────────┐
+│  your MonoBehaviours — Update() invoked BY the engine     │
+│  your C# GameObject is a <span class="nice">handle</span>: the real one lives below │
+│  garbage collector here → the famous GC hitches           │
+├─ <span class="hurt">the native↔managed bridge — every crossing has a cost</span> ──┤
+│                                                           │
+│  PlayerLoop (theirs, not yours):                          │
+│    input → FixedUpdate×N + physics (PhysX) → Update       │
+│          → animation → LateUpdate → render                │
+│  GameObject, Transform actually live HERE, in C++         │
+│  asset database · renderer · audio                        │
+└─ C++ WORLD (closed source) ───────────────────────────────┘</pre>
+    <div class="caption">Explains three folklore rules at once: why touching
+    <code>transform</code> in a loop is slow (bridge crossings), why everyone
+    pools objects (the C# garbage collector), and why DOTS exists — it moves
+    your <em>data</em> below the bridge, where the loop can chew it in bulk.
+    LÖVE has the same anatomy: C++ core, your Lua called across a boundary,
+    60 times a second.</div>
+  </div>
+
+  <h3>Real code</h3>
+<pre><code class="cs">// Paddle.cs — attach this to a GameObject in the editor
+public class Paddle : MonoBehaviour {          // a part with logic: #3, verbatim
+    public float speed = 360f;                 // shows up in the Inspector (data-driven)
+    public UnityEvent onBallHit;               // designers wire reactions here: #4
+
+    void Update() {                            // every object updates its own parts
+        float dir = Input.GetAxisRaw("Vertical");
+        transform.Translate(0, dir * speed * Time.deltaTime, 0);
+    }                                          // transform = a node in a tree: #5
+}</code></pre>
+  <p>Four paradigms in ten lines — count the tags. You already wrote this
+  class in Lua two weeks ago.</p>
+
+  <details class="q"><summary>❓ "So… is Unity an ECS engine?"</summary>
+    <div class="body"><p><strong>No.</strong> Run the three tells from Part 1:
+    MonoBehaviours carry logic (components should be plain data), each object
+    updates its own parts (systems should process in bulk), and they find
+    each other with <code>GetComponent</code> (systems should query). That's
+    architecture #3, not #6. The confusion is so common precisely because
+    "component" appears in both names — now you're immune to it.</p></div>
+  </details>
+  <details class="q"><summary>❓ "Then what is DOTS, and why did it take from 2017 to 2023 to ship?"</summary>
+    <div class="body"><p>DOTS <em>is</em> real ECS (architecture #6) — plain-data
+    components, systems, queries, cache-friendly storage — built for the
+    workloads where MonoBehaviour hits a wall: crowds, simulations, thousands
+    of uniform things. It was announced in 2017 and reached 1.0 in
+    <em>2023</em>, after years of preview rewrites. Why so brutal? Because
+    retrofitting a new core paradigm into an engine is fighting the engine's
+    entire gravity: twenty years of tutorials, every Asset Store package,
+    every team's habits, and every editor workflow assume MonoBehaviour.
+    The result: DOTS ships as an <em>opt-in escape hatch</em> for hot paths,
+    not a replacement. Architecture choices are nearly irreversible at
+    engine scale — that's why this class exists.</p></div>
+  </details>
+  <details class="q"><summary>❓ "Why does every Unity project have a GameManager?"</summary>
+    <div class="body"><p>Part 1, components, hard round: cross-cutting rules
+    (match flow, turn order, win conditions) have no object to live on, so
+    every project invents an invisible GameObject with a manager script — a
+    procedural program (architecture #1) wearing a component costume. Unity
+    never gave flow logic a first-class home, so the community standardized
+    the workaround. Related smell: when the order of component updates
+    matters, the fix is a settings panel called <em>Script Execution
+    Order</em>. When your architecture needs a settings panel to sequence
+    itself, that's a red cell showing through.</p></div>
+  </details>
+
+  <div class="scorecard">
+    <div class="plus"><h4>The bet bought them</h4><ul><li>Compose-in-editor: designers build without compiling</li><li>Gentlest learning curve of the big three</li><li>The Asset Store: parts are tradeable, an economy of components</li></ul></div>
+    <div class="minus"><h4>The bet cost them</h4><ul><li>Flow logic homeless → manager sprawl</li><li>Implicit update order between thousands of scripts</li><li>Performance ceiling → the six-year DOTS retrofit</li></ul></div>
+  </div>
+</section>
+
+<!-- ======================================================= UNREAL -->
+<section class="arch" id="unreal">
+  <div class="arch-head"><span class="arch-num">ENGINE 2/3</span><h2>Unreal — the layered bet</h2></div>
+  <span class="lives">core bet: <b>inheritance (#2)</b>, made in 1998 — then never undone</span>
+  <div class="badges"><span class="badge">Fortnite</span><span class="badge">Gears of War</span><span class="badge">Final Fantasy VII Remake</span><span class="badge">basically all AAA third-party</span></div>
+
+  <h3>The bet</h3>
+  <p>Unreal Engine 1 shipped in 1998, when deep C++ inheritance was simply
+  <em>how games were made</em> — and it committed hard:
+  <code>AActor → APawn → ACharacter</code> is a chain your students can still
+  open in UE5 today. But Unreal made a second bet nobody else made in 1998:
+  a <strong>scripting layer for designers</strong> (UnrealScript then, visual
+  Blueprints now), so gameplay could be authored without touching the C++
+  core. Everything since has been layers: components bolted on, delegates for
+  events, data assets everywhere. Unreal is not one architecture — it's
+  <strong>25 years of architectures, stacked, with backward compatibility as
+  the prime directive</strong>. That's the honest answer to "why is Unreal so
+  complex."</p>
+
+  <h3>How it grew</h3>
+  <ul class="timeline">
+    <li><span class="yr">1998</span><b>Unreal Engine 1</b> — two bets at
+      once: a deep C++ Actor hierarchy for the engine, and UnrealScript on
+      top so modders and designers could write gameplay without touching it.
+      <span class="pnum">#2 + scripting layer</span>
+      <span class="why">The scripting layer is why Unreal mods (and half the
+      industry's designers) exist.</span></li>
+    <li><span class="yr">2006</span><b>UE3: Kismet</b> — visual scripting for
+      level logic; designers click boxes together instead of filing tickets.
+      <span class="pnum">data-driven, visual</span>
+      <span class="why">Pain: gameplay iteration was bottlenecked on
+      programmers.</span></li>
+    <li><span class="yr">2014</span><b>UE4</b> — UnrealScript is
+      <em>deleted</em> after 16 years, replaced by Blueprints (Kismet grown
+      up) plus exposed C++; ActorComponents get promoted to first-class.
+      <span class="pnum">#3 components</span>
+      <span class="why">Pain: the hierarchy was too rigid for cross-branch
+      abilities — the exact hard round from Part 1. Also proof a paradigm
+      CAN be removed: at the price of breaking every project in
+      existence.</span></li>
+    <li><span class="yr">2022</span><b>UE5: Mass Entity</b> — an opt-in ECS
+      layer, debuted moving the crowds of the <em>Matrix Awakens</em> city
+      demo.
+      <span class="pnum">#6 ECS</span>
+      <span class="why">Pain: ten thousand pedestrians do not want to be
+      Actors.</span></li>
+  </ul>
+
+  <h3>The composition</h3>
+  <div class="diagram">
+    <div class="dbox nice"><b>the core: the Actor hierarchy <span class="pnum">#2 inheritance</span></b>
+      <div class="note"><code>AActor → APawn → ACharacter</code> — derive your
+      player from ACharacter and inherit walking, jumping, networking,
+      replication. "Same but different" at its industrial best.</div>
+    </div>
+    <div class="dbox"><b>layered on top</b>
+      <div class="chips">
+        <span class="chip">ActorComponents <span class="pnum">#3 components</span></span>
+        <span class="chip">delegates / dispatchers <span class="pnum">#4 events</span></span>
+        <span class="chip">component attachment, World Outliner <span class="pnum">#5 tree</span></span>
+        <span class="chip">Blueprints, DataTables <span class="pnum">data-driven</span></span>
+      </div>
+    </div>
+    <div class="dbox"><b>the escape hatches</b>
+      <div class="chips">
+        <span class="chip">GameMode / GameState <span class="pnum">flow, first-class!</span></span>
+        <span class="chip">Mass Entity (UE5) <span class="pnum">#6 ECS</span></span>
+      </div>
+      <div class="note">Note GameMode: Unreal is the only one of the three
+      that gives match flow a <em>dedicated class</em> instead of a
+      community workaround. Decades of shipped shooters taught them.</div>
+    </div>
+  </div>
+
+  <h3>Under the hood</h3>
+  <p>Unreal is <strong>one giant open-source C++ program</strong> — but C++
+  is hostile to gameplay iteration (compile times, manual memory, no
+  reflection). Unity's answer was to bolt a C# VM beside the engine;
+  Unreal's answer is stranger: it <strong>grew a managed language inside
+  C++</strong>.</p>
+  <div class="diagram">
+<pre class="tree">┌─ BLUEPRINT VM ────────────────────────────────────────────┐
+│  designers' bytecode, interpreted (~10× slower than C++   │
+│  and it does not matter: it calls native code for the     │
+│  heavy parts — exactly like your Lua calls LÖVE)          │
+├─ UOBJECT SYSTEM ──────────────────────────────────────────┤
+│  <span class="nice">a managed language built inside C++</span>: garbage collection, │
+│  reflection, serialization, network replication — the     │
+│  UCLASS()/UPROPERTY() macros feed a code generator (UHT)  │
+│  that writes the plumbing C++ can't express               │
+├─ THE WORLD ───────────────────────────────────────────────┤
+│  Actors registered into tick groups; the frame is a       │
+│  schedule of ticks, not one loop over one list            │
+├─ ENGINE MODULES ──────────────────────────────────────────┤
+│  GameThread  │  RenderThread  │  RHI thread  │  Chaos     │
+│  simulates N │  draws N-1     │  talks GPU   │  physics   │
+└───────────────────────────────────────────────────────────┘</pre>
+    <div class="caption">Two things to notice. The UObject layer is why
+    Unreal C++ "feels weird" — those macros aren't decoration, they generate
+    the reflection and GC machinery. And the thread split means the render
+    thread is always drawing <em>last</em> frame while the game thread
+    simulates this one: engine-scale parallelism, hidden behind the Actor
+    API.</div>
+  </div>
+
+  <h3>Real code</h3>
+<pre><code class="cpp">// Paddle.h — inheritance is alive and unashamed: #2
+UCLASS()
+class APaddle : public APawn {                  // AActor -&gt; APawn -&gt; you
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) // exposed to designers: data-driven
+    float Speed = 360.f;
+
+    UPROPERTY(VisibleAnywhere)
+    UStaticMeshComponent* Mesh;                 // components, layered on: #3
+
+    UPROPERTY(BlueprintAssignable)
+    FOnBallHit OnBallHit;                       // delegates: #4
+};</code></pre>
+  <p>Same count, four paradigms — but look which one is the <em>spine</em>
+  here versus in Unity. In Unity you attach; in Unreal you <em>derive, then</em>
+  attach.</p>
+
+  <details class="q"><summary>❓ "Didn't Part 1 say inheritance breaks? Why does it survive here?"</summary>
+    <div class="body"><p>Because Part 1's hard round was about <em>combining
+    abilities across branches</em> — and the things Unreal's chain models
+    (player characters in shooters) genuinely ARE tree-shaped: nearly every
+    game wants "ACharacter, but slightly different," and almost none wants a
+    Ball-that-steers-like-a-Paddle. Inheritance is a fine bet <em>when your
+    domain really is a tree</em>. The cost shows at the edges:
+    <code>ACharacter</code> is a famously enormous god-class, and when your
+    game's pawn <em>isn't</em> a biped with gravity, you fight the
+    inheritance instead of riding it. Betting on #2 means betting on what
+    kind of games your engine is for — and Unreal's answer has always been
+    clear.</p></div>
+  </details>
+  <details class="q"><summary>❓ "Why two languages? The C++/Blueprint split seems insane."</summary>
+    <div class="body"><p>It's the same split you're living in this course:
+    LÖVE's C++ core underneath, your Lua gameplay on top. Engine-grade code
+    (rendering, physics, networking) needs C++'s performance and lives with
+    engineers; gameplay changes daily and belongs to designers, so it gets a
+    forgiving, hot-reloadable layer. The friction is real — every studio
+    argues about where the boundary sits — but the alternative is designers
+    filing tickets for every tweak. Almost every big engine converges on a
+    two-language split; Unreal just made it visual.</p></div>
+  </details>
+  <details class="q"><summary>❓ "Where's Unreal's ECS?"</summary>
+    <div class="body"><p>Same story as Unity, five years later: UE5 ships
+    <strong>Mass Entity</strong>, an opt-in ECS used for exactly the workload
+    Part 1 predicted — the crowds in the <em>Matrix Awakens</em> city demo,
+    thousands of pedestrians and cars. The pattern to remember: both giants
+    kept their core bet and <em>added ECS as a special-purpose layer where
+    the bulk lives</em>. Nobody rewrites the core; they patch the red
+    cell.</p></div>
+  </details>
+
+  <div class="scorecard">
+    <div class="plus"><h4>The bet bought them</h4><ul><li>Derive ACharacter, get a shippable networked player for free</li><li>Designers author gameplay without engineers (Blueprints)</li><li>Flow has a real home (GameMode) — no ghost managers</li></ul></div>
+    <div class="minus"><h4>The bet cost them</h4><ul><li>The steepest learning cliff of the three</li><li>God-classes at the top of the hierarchy</li><li>Reading it is archaeology: three decades of stacked decisions</li></ul></div>
+  </div>
+</section>
+
+<!-- ======================================================== GODOT -->
+<section class="arch" id="godot">
+  <div class="arch-head"><span class="arch-num">ENGINE 3/3</span><h2>Godot — the contrarian bet</h2></div>
+  <span class="lives">core bet: <b>scene tree (#5) + signals (#4)</b> — and a public refusal of ECS</span>
+  <div class="badges"><span class="badge">Brotato</span><span class="badge">Dome Keeper</span><span class="badge">Cassette Beasts</span><span class="badge">open source (MIT)</span></div>
+
+  <h3>The bet</h3>
+  <p>Godot (open-sourced 2014) is the deliberate contrarian: while the
+  industry chased ECS, its creators wrote a manifesto —
+  <a href="https://godotengine.org/article/why-isnt-godot-ecs-based-game-engine/">"Why
+  isn't Godot an ECS-based game engine?"</a> — and doubled down on the tree.
+  <strong>Everything is a Node.</strong> Behavior = subclass a node
+  (<code>extends CharacterBody2D</code>) and override <code>_process</code>;
+  composition = give a node children; communication = signals. A "scene" is
+  just a saved subtree you instance anywhere — so the paddle-with-a-sprite-child
+  you built in <code>lesson/pong/05-scenegraph</code> is, structurally,
+  a Godot game. The bet is explicit in the manifesto: optimize for the
+  programmer's <em>understanding</em>, not the CPU's cache — and let the
+  engine's internals worry about speed.</p>
+
+  <h3>How it held</h3>
+  <p>Unity and Unreal grew by <em>adding</em> paradigms. Godot's history is
+  the opposite shape: the same bet, defended for two decades — with the
+  pressure absorbed by the internals instead of the API.</p>
+  <ul class="timeline">
+    <li><span class="yr">2001</span><b>the ancestor</b> — Juan Linietsky and
+      Ariel Manzur build in-house engines for contract work in Argentina;
+      the scenes-and-nodes idea is already forming.</li>
+    <li><span class="yr">2014</span><b>open-sourced as Godot</b> (MIT) — the
+      core bet arrives public and already whole: everything is a node,
+      nodes talk by signals, scenes are saved subtrees.
+      <span class="pnum">#5 + #4</span></li>
+    <li><span class="yr">2018</span><b>Godot 3.0</b> — the internals are
+      formalized as <em>Servers</em>: flat, data-oriented rendering and
+      physics cores behind the node façade.
+      <span class="pnum">data-oriented inside</span>
+      <span class="why">Pain: trees are slow to traverse in bulk — so the
+      bulk moved below the API instead of changing it.</span></li>
+    <li><span class="yr">2021</span><b>the manifesto</b> — years of "why
+      isn't this ECS?" pressure get a written answer instead of a pivot.
+      <span class="why">The bet defended in public, with arguments — which
+      is rarer and braver than quietly drifting.</span></li>
+    <li><span class="yr">2023</span><b>Godot 4.0</b> — a full rewrite of the
+      core… and the API is <em>still nodes</em>. Same bet, third decade.</li>
+  </ul>
+
+  <h3>The composition</h3>
+  <div class="diagram">
+    <div class="dbox nice"><b>the core: the Node tree <span class="pnum">#5 scene graph</span> + signals <span class="pnum">#4 events</span></b>
+      <div class="note">The only engine of the three whose <em>event system is
+      part of the core bet</em>, not a layer: nodes are wired by signals in
+      the editor, exactly like our event-bus Pong.</div>
+    </div>
+    <div class="dbox"><b>layered on top</b>
+      <div class="chips">
+        <span class="chip">extends Node scripts <span class="pnum">#2 inheritance, kept shallow</span></span>
+        <span class="chip">child nodes as parts <span class="pnum">#3 composition, tree-flavored</span></span>
+        <span class="chip">.tscn scenes, Resources <span class="pnum">data-driven</span></span>
+      </div>
+    </div>
+    <div class="dbox"><b>the escape hatches</b>
+      <div class="chips">
+        <span class="chip">autoload singletons <span class="pnum">global state</span></span>
+        <span class="chip">Servers, MultiMesh <span class="pnum">data-oriented internals</span></span>
+      </div>
+    </div>
+  </div>
+
+  <h3>Under the hood</h3>
+  <p>The accordion below claims the tree is the interface, not the
+  implementation. Here's that claim as a picture:</p>
+  <div class="diagram">
+<pre class="tree">┌─ GDSCRIPT / C# VM ────────────────────────────────────────┐
+│  your scripts, attached to nodes                          │
+├─ SCENETREE (the main loop) ───────────────────────────────┤
+│  root ─ court ─ paddle ─ sprite …                         │
+│  walks the tree calling _process(delta) — literally our   │
+│  lesson/pong/05-scenegraph, industrialized                │
+│  a node is a <span class="nice">thin façade holding an RID</span> — a claim ticket  │
+│  for a resource that lives below                          │
+├─ SERVERS (the real engine) ───────────────────────────────┤
+│  RenderingServer │ PhysicsServer │ AudioServer            │
+│  flat arrays indexed by RID — <span class="nice">no tree down here!</span>         │
+│  nodes send commands; servers can run on their own threads│
+├─ DRIVERS / PLATFORM ──────────────────────────────────────┤
+│  Vulkan / GL, OS                                          │
+└───────────────────────────────────────────────────────────┘</pre>
+    <div class="caption">When you set <code>sprite.position</code>, the node
+    forwards a command to the RenderingServer, which updates a flat array —
+    the tree never touches the hot path. That's how the "reject ECS" engine
+    stays fast: the paradigm debate is about the API humans see (layer 3);
+    below it, everyone converges on flat, data-oriented arrays.</div>
+  </div>
+
+  <h3>Real code</h3>
+<pre><code class="gd"># paddle.gd — a script on a node in the tree: #5
+extends CharacterBody2D
+
+signal ball_hit                       # signals are first-class citizens: #4
+
+@export var speed := 360.0            # shows up in the Inspector (data-driven)
+
+func _process(delta):                 # override the node's behavior: #2, shallow
+    var dir := Input.get_axis("ui_up", "ui_down")
+    position.y += dir * speed * delta</code></pre>
+
+  <details class="q"><summary>❓ "Why did Godot reject ECS? Are they wrong?"</summary>
+    <div class="body"><p>Read the manifesto — it's assigned reading, and it's
+    a <em>defensible engineering argument</em>, not ignorance: most games are
+    not crowd simulations; most gameplay code is written by people who think
+    in scenes and objects, not in queries; and composition-by-child-nodes
+    covers most of what component-composition buys. They chose the green
+    cells that matter for their users (understandability, content workflow)
+    and accepted the red ones. You don't have to agree — Bevy's designers
+    wrote essentially the opposite manifesto — but notice that <strong>an
+    informed team looked at ECS and said no, for reasons</strong>. That
+    should permanently cure you of "X is always the right
+    architecture."</p></div>
+  </details>
+  <details class="q"><summary>❓ "Then why isn't Godot slow?"</summary>
+    <div class="body"><p>Because the tree is the <em>interface</em>, not the
+    <em>implementation</em>. Under the nodes sit the
+    <strong>Servers</strong> — RenderingServer, PhysicsServer — flat,
+    data-oriented cores that process everything in bulk, no tree in sight.
+    Nodes are a friendly façade that forwards to them. And when you truly
+    need 10,000 things, you skip nodes and talk to the servers directly
+    (MultiMesh, RenderingServer API). So even the engine that publicly
+    rejected ECS is <em>data-oriented inside</em> — the paradigm war is about
+    the API you give humans, not what the machine runs.</p></div>
+  </details>
+  <details class="q"><summary>❓ "Where does the Pokémon party live in Godot?"</summary>
+    <div class="body"><p>Part 1's scene-graph hard round, now with the
+    official answer: <strong>autoload singletons</strong> — scripts the
+    engine instantiates outside any scene, globally reachable, surviving
+    scene changes. It is global state, institutionalized, with documentation
+    and a settings tab. Every core bet needs an escape hatch for what it
+    can't model; the mature engines just admit it and give the hatch a
+    name.</p></div>
+  </details>
+
+  <div class="scorecard">
+    <div class="plus"><h4>The bet bought them</h4><ul><li>The smallest mental model — one concept, nodes</li><li>Scenes compose like Lego; instancing is the whole workflow</li><li>Signals everywhere = decoupling by default</li></ul></div>
+    <div class="minus"><h4>The bet cost them</h4><ul><li>Crowds/bulk need escape hatches (servers, MultiMesh)</li><li>String node paths — one rename from a crash</li><li>Non-scene state exiles to autoload sprawl</li></ul></div>
+  </div>
+</section>
+
+<!-- ====================================================== ROSETTA -->
+<section class="arch" id="rosetta">
+  <div class="arch-head"><span class="arch-num">=</span><h2>The Rosetta stone</h2></div>
+
+  <p>One table to take home: every paradigm from Part 1, and what it's
+  <em>called</em> in each engine. Green = that engine's core bet. When you
+  open any engine's docs from now on, you're not learning a new religion —
+  you're locating its features on this map.</p>
+
+  <div class="table-scroll">
+  <table class="heat">
+    <tr><th>paradigm</th><th>Unity</th><th>Unreal</th><th>Godot</th></tr>
+    <tr><td>#1 procedural</td><td>"GameManager" scripts</td><td class="dim">(GameMode absorbs it)</td><td>autoload scripts</td></tr>
+    <tr><td>#2 inheritance</td><td class="dim">rare in gameplay</td><td class="core">AActor → APawn → ACharacter</td><td>extends Node, kept shallow</td></tr>
+    <tr><td>#3 components</td><td class="core">GameObject + MonoBehaviour</td><td>ActorComponents</td><td>child nodes as parts</td></tr>
+    <tr><td>#4 events</td><td>UnityEvents, C# events</td><td>delegates, dispatchers</td><td class="core">signals</td></tr>
+    <tr><td>#5 scene graph</td><td>Transform hierarchy</td><td>attachment + World Outliner</td><td class="core">the Node tree</td></tr>
+    <tr><td>#6 ECS</td><td>DOTS / Entities (opt-in)</td><td>Mass Entity (opt-in)</td><td class="dim">rejected — Servers inside</td></tr>
+    <tr><td>data-driven</td><td>prefabs, ScriptableObjects</td><td>Blueprints, DataTables</td><td>.tscn scenes, Resources</td></tr>
+  </table>
+  </div>
+
+  <p>Three observations worth saying out loud. <strong>Every row is full</strong> —
+  all three engines contain some version of nearly every paradigm.
+  <strong>The green cells differ</strong> — the same toolbox, organized
+  around different core bets, made in different decades for different users.
+  And <strong>the ECS row is all edges</strong> — opt-in here, opt-in there,
+  rejected-but-hidden-inside over there. ECS is the youngest bet, and the
+  incumbents can only bolt it on. Keep that in mind next week when we build
+  one from scratch — you'll have the thing Unity spent five years
+  retrofitting.</p>
+</section>
+
+<!-- ====================================================== POKEMON -->
+<section class="arch" id="pokemon">
+  <div class="arch-head"><span class="arch-num">◓</span><h2>Pokémon, shipped</h2></div>
+
+  <p>Final exercise. Through Part 1 we pushed one imaginary Pokémon game
+  through each paradigm and watched something break every time. Now drop the
+  constraint that it must be <em>one</em> paradigm — architect it like an
+  engine team would, subsystem by subsystem:</p>
+
+  <div class="diagram">
+    <div class="dbox"><b>overworld simulation <span class="pnum">#6 ECS</span></b>
+      <div class="note">Hundreds of NPCs, tall grass, ledges, the player —
+      crowds of uniform things. Bicycle = one component + one system.</div>
+    </div>
+    <div class="dbox"><b>battle flow <span class="pnum">state machine + data tables</span></b>
+      <div class="note">Intro → menu → move → animation → damage → faint
+      check: strictly sequential, exactly two combatants. Plain explicit
+      states — like <code>fsm</code> in the hybrid demo below. Species,
+      moves, and trainers are rows in tables (data-driven), not code.</div>
+    </div>
+    <div class="dbox"><b>abilities &amp; items <span class="pnum">#4 events</span></b>
+      <div class="note">"WHEN hit by a contact move, DO 30% paralysis" —
+      handlers on the battle's event stream, one subscriber per ability.</div>
+    </div>
+    <div class="dbox"><b>camera, menus, dialog <span class="pnum">#5 scene tree</span></b>
+      <div class="note">Spatial and nested: the camera rides the player, the
+      dialog box rides the UI layer.</div>
+    </div>
+    <div class="caption">Four paradigms, one game, zero contradictions — each
+    subsystem gets the architecture whose green column it lives in.
+    Architecture is chosen <em>per subsystem</em>, not per game.</div>
+  </div>
+
+  <h3>Proof it composes — Pong number seven</h3>
+  <span class="run">love lesson/pong/07-hybrid</span>
+  <p>One last Pong: ECS simulates the court, systems <em>announce facts</em>
+  on an event bus, and an explicit state machine owns the match flow
+  (serve delay → play → game over) — Part 1's ECS hard question, answered in
+  code. The boundaries are the whole lesson:</p>
+<pre><code class="lua">-- systems DETECT and announce [ECS -&gt; EVENT]:
+registry.destroy(ballEntity)
+Bus.emit("ball:out", out)          -- who scores? not my job
+
+-- handlers DECIDE [EVENT -&gt; FSM]:
+Bus.on("ball:out", function(side)
+    if side == "left" then match.right = match.right + 1
+    else match.left = match.left + 1 end
+    if match.left &gt;= 5 or match.right &gt;= 5 then
+        fsm.enter("gameover")
+    else
+        fsm.enter("serve", side == "left" and -1 or 1)
+    end
+end)
+
+-- the state machine SEQUENCES [FSM]:
+states.serve = {
+    update = function(dt)
+        if fsm.time &gt; 0.8 then
+            spawnBall(states.serve.direction)
+            fsm.enter("play")
+        end
+    end,
+}</code></pre>
+  <p>Press B: the ECS half still shrugs at extra balls. Score the fifth
+  point: the state machine reads like a sentence. Each paradigm kept its
+  green cells; none was forced into its red ones.</p>
+</section>
+
+<!-- ========================================================== LAB -->
+<section class="arch" id="lab">
+  <div class="arch-head"><span class="arch-num">⚗</span><h2>Your lab: Breakout, rebuilt on ECS</h2></div>
+
+  <p>Now the semester's main thread begins: you'll rebuild your Breakout on
+  ECS. Look at the Rosetta stone's last row and the verdict table from
+  Part 1 — bricks, balls, power-ups, particles are crowds of uniform things
+  with composable abilities. That's ECS's green column, and now you know
+  <em>why</em> it's the right tool for this job, not just that the professor
+  said so.</p>
+
+  <p>And when you hit the moments where ECS fights you — the level-cleared
+  sequence, the game-over screen, the "what order do my systems run in"
+  bug — you have permission to do what every engine on this page does:
+  a small state machine for flow, an event for the score popup. Knowing
+  <em>where your architecture's red cells are</em> is the difference between
+  using a paradigm and belonging to a cult.</p>
+
+  <div class="callout thesis">
+    <strong>The course thesis, in one line:</strong> an architecture is a bet
+    about which changes will be cheap — engines hedge that bet by mixing
+    paradigms per subsystem, and from next week, you'll be able to make (and
+    hedge) that bet yourself.
+  </div>
+
+  <p class="notice">Demos: <code>love lesson/pong/07-hybrid</code> (new) and
+  all of Part 1's. Assigned: the
+  <a href="https://godotengine.org/article/why-isnt-godot-ecs-based-game-engine/">Godot
+  ECS manifesto</a> and the
+  <a href="https://www.youtube.com/watch?v=8QHHVpBiG-I">Overwatch GDC
+  talk</a> if you haven't yet — you now have the vocabulary to catch both
+  authors making bets. · <a href="index.html">Back to Part 1</a></p>
+</section>
+
+</main>
+<script>
+// tiny multi-language highlighter for the snippets
+var LANGS = {
+  lua: { comment: "--[^\\n]*",
+         kw: "function|local|if|then|else|elseif|end|for|in|do|while|return|and|or|not|break|true|false|nil" },
+  cs:  { comment: "//[^\\n]*",
+         kw: "public|private|class|void|float|var|new|using|return|if|else|static|override" },
+  cpp: { comment: "//[^\\n]*",
+         kw: "class|public|private|virtual|void|float|override|return|if|else|new|const|struct" },
+  gd:  { comment: "#[^\\n]*",
+         kw: "extends|signal|func|var|const|if|else|return|pass|export|onready|await" },
+};
+Object.keys(LANGS).forEach(function (lang) {
+  var def = LANGS[lang];
+  var re = new RegExp(
+    "(" + def.comment + ")|(\"(?:[^\"\\\\]|\\\\.)*\")|\\b(" + def.kw + ")\\b", "g");
+  document.querySelectorAll("pre code." + lang).forEach(function (block) {
+    var src = block.textContent
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    block.innerHTML = src.replace(re, function (m, comment, str, kw) {
+      if (comment) return '<span class="c">' + comment + "</span>";
+      if (str) return '<span class="s">' + str + "</span>";
+      return '<span class="k">' + kw + "</span>";
+    });
+  });
+});
+
+// hover tooltips: every "#N" reference names its architecture
+var PARADIGMS = {
+  1: "#1 procedural — behavior lives in the update loop",
+  2: "#2 OO inheritance — behavior lives in the class",
+  3: "#3 components — behavior lives in attached parts",
+  4: "#4 events — behavior lives in subscribers",
+  5: "#5 scene graph — behavior lives in nodes",
+  6: "#6 ECS — behavior lives in systems over data",
+};
+document.querySelectorAll(".pnum").forEach(function (el) {
+  var m = el.textContent.match(/#([1-6])/);
+  if (m) el.title = PARADIGMS[m[1]];
+});
+var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+  acceptNode: function (node) {
+    if (node.parentElement.closest("script, style, nav, .pnum"))
+      return NodeFilter.FILTER_REJECT;
+    // #N not followed by a digit (so "Pokémon #152" stays untouched)
+    return /#[1-6](?![0-9])/.test(node.nodeValue)
+      ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+  },
+});
+var refs = [];
+while (walker.nextNode()) refs.push(walker.currentNode);
+refs.forEach(function (node) {
+  var frag = document.createDocumentFragment();
+  node.nodeValue.split(/(#[1-6])(?![0-9])/).forEach(function (part) {
+    var m = part.match(/^#([1-6])$/);
+    if (m) {
+      var span = document.createElement("span");
+      span.className = "pref";
+      span.title = PARADIGMS[m[1]];
+      span.textContent = part;
+      frag.appendChild(span);
+    } else {
+      frag.appendChild(document.createTextNode(part));
+    }
+  });
+  node.parentNode.replaceChild(frag, node);
+});
+</script>
+</body>
+</html>
