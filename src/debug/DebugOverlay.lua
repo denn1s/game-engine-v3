@@ -27,6 +27,7 @@ local inspectedScene = nil -- to drop the selection when the scene changes
 
 local FRAME_HISTORY = 120 -- two seconds' worth at 60fps
 local frameTimes = {} -- rolling window of dt, in milliseconds
+local displayedFPS = 0 -- frozen while paused, like everything else
 
 -- One Combo picks WHICH component to edit, and only that one is drawn.
 -- With a tree per component the editor grows with the entity; with a
@@ -69,7 +70,7 @@ local function buildUi(scene)
         -- tree nodes are for nesting INSIDE content, same convention as
         -- Dear ImGui). All default open; fold what you don't need.
         if imlove.CollapsingHeader("frame", true) then
-            imlove.Text("FPS: %d", love.timer.getFPS())
+            imlove.Text("FPS: %d", displayedFPS)
 
             -- frame TIME, not just FPS: FPS is an average, and averages
             -- hide spikes — one 50ms hitch among fifty smooth frames
@@ -207,13 +208,6 @@ end
 function DebugOverlay.beginFrame(scene)
     imlove.NewFrame()
 
-    -- sampled even while paused or hidden: the plot reports the real
-    -- frame, tool cost included, and has history the moment you open it
-    frameTimes[#frameTimes + 1] = love.timer.getDelta() * 1000
-    if #frameTimes > FRAME_HISTORY then
-        table.remove(frameTimes, 1)
-    end
-
     if scene ~= inspectedScene then -- entity numbers reset with the registry
         inspectedScene = scene
         selectedEntity = nil
@@ -232,14 +226,30 @@ end
 -- useless. Hiding the overlay also lifts the pause: a game frozen by an
 -- invisible tool is a bug report waiting to happen.
 function DebugOverlay.shouldUpdate()
+    local run
     if not (visible and paused) then
-        return true
-    end
-    if stepOnce then
+        run = true
+    elseif stepOnce then
         stepOnce = false
-        return true
+        run = true
+    else
+        run = false
     end
-    return false
+
+    -- the FPS label and the frame-time plot sample HERE, not in
+    -- beginFrame: this gate is the single source of truth for "a game
+    -- frame is about to happen", so the numbers freeze with the world —
+    -- watching them dance over a paused game reads as a bug — and every
+    -- F10 step appends exactly one honest sample. (Relies on main.lua
+    -- calling shouldUpdate once per frame, which is its contract.)
+    if run then
+        displayedFPS = love.timer.getFPS()
+        frameTimes[#frameTimes + 1] = love.timer.getDelta() * 1000
+        if #frameTimes > FRAME_HISTORY then
+            table.remove(frameTimes, 1)
+        end
+    end
+    return run
 end
 
 function DebugOverlay.draw()
