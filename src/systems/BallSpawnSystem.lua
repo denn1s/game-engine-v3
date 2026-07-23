@@ -21,8 +21,7 @@ function BallSpawnSystem.update(scene, dt)
     local _, match = registry:first("match")
     if match.state ~= "play" then return end -- frozen on the gameover screen
 
-    for _, requestEntity in ipairs(registry:query("serveRequest")) do
-        local request = registry:get(requestEntity, "serveRequest")
+    for requestEntity, request in registry:each("serveRequest") do
         registry:destroy(requestEntity) -- consume the event
 
         registry:spawn({

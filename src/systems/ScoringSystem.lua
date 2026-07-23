@@ -24,10 +24,7 @@ function ScoringSystem.update(scene, dt)
 
     local screenW = love.graphics.getWidth()
 
-    for _, ballEntity in ipairs(registry:query("ball", "position", "size")) do
-        local pos = registry:get(ballEntity, "position")
-        local size = registry:get(ballEntity, "size")
-
+    for ballEntity, pos, size in registry:each("position", "size", "ball") do
         local serveDirection
         if pos.x + size.w < 0 then
             match.right = match.right + 1

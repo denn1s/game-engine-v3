@@ -16,8 +16,8 @@ function InputSystem.update(scene, dt)
     local registry = scene.registry
     local _, match = registry:first("match")
 
-    for _, keyEntity in ipairs(registry:query("keyPressed")) do
-        local key = registry:get(keyEntity, "keyPressed").key
+    for keyEntity, event in registry:each("keyPressed") do
+        local key = event.key
         registry:destroy(keyEntity) -- consume the event
 
         if key == "escape" then

@@ -39,9 +39,7 @@ function RenderSystem.draw(scene)
 
     -- every entity that has a position and a size is a white rectangle.
     -- (Sprites arrive in a few weeks; this is our "render component" for now.)
-    for _, entity in ipairs(registry:query("position", "size")) do
-        local pos = registry:get(entity, "position")
-        local size = registry:get(entity, "size")
+    for _, pos, size in registry:each("position", "size") do
         love.graphics.rectangle("fill", pos.x, pos.y, size.w, size.h)
     end
 

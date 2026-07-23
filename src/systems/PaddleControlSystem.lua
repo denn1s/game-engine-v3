@@ -29,10 +29,7 @@ function PaddleControlSystem.update(scene, dt)
     local _, match = registry:first("match")
     if match.state ~= "play" then return end -- frozen on the gameover screen
 
-    for _, entity in ipairs(registry:query("paddle", "velocity")) do
-        local paddle = registry:get(entity, "paddle")
-        local vel = registry:get(entity, "velocity")
-
+    for _, paddle, vel in registry:each("paddle", "velocity") do
         local dir = 0
         if love.keyboard.isDown(paddle.upKey) then dir = dir - 1 end
         if love.keyboard.isDown(paddle.downKey) then dir = dir + 1 end

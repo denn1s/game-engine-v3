@@ -10,11 +10,7 @@ function BounceWallsSystem.update(scene, dt)
 
     local screenH = love.graphics.getHeight()
 
-    for _, entity in ipairs(registry:query("bounceWalls", "position", "size", "velocity")) do
-        local pos = registry:get(entity, "position")
-        local size = registry:get(entity, "size")
-        local vel = registry:get(entity, "velocity")
-
+    for _, pos, size, vel in registry:each("position", "size", "velocity", "bounceWalls") do
         if pos.y < 0 then
             pos.y = 0
             vel.vy = -vel.vy

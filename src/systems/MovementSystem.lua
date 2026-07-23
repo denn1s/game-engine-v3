@@ -8,9 +8,7 @@ function MovementSystem.update(scene, dt)
     local _, match = registry:first("match")
     if match.state ~= "play" then return end -- frozen on the gameover screen
 
-    for _, entity in ipairs(registry:query("position", "velocity")) do
-        local pos = registry:get(entity, "position")
-        local vel = registry:get(entity, "velocity")
+    for _, pos, vel in registry:each("position", "velocity") do
         pos.x = pos.x + vel.vx * dt
         pos.y = pos.y + vel.vy * dt
     end
