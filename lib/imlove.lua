@@ -54,6 +54,23 @@ imlove.io = {
   -- Mirrors ImGui's io.IniFilename. Set to nil or false before your first
   -- NewFrame() to disable persistence entirely.
   IniFilename = "imlove.ini",
+
+  -- The default font for every widget, mirroring ImGui's io.FontDefault:
+  -- nil (the default) means the library's own lazily-created 13px LÖVE
+  -- font. Assign any LÖVE Font to replace it — the usual reason being
+  -- symbol glyphs the built-in font lacks (▶, ⏸, ⏭ on debug buttons),
+  -- via LÖVE's own fallback mechanism:
+  --
+  --   local ui = love.graphics.newFont(13)
+  --   ui:setFallbacks(love.graphics.newFont("NotoSansSymbols2-Regular.ttf", 13))
+  --   imlove.io.FontDefault = ui
+  --
+  -- Re-read every NewFrame(), so it can be set or cleared (back to nil)
+  -- at any time; PushFont()/PopFont() still layer on top of whatever this
+  -- makes the default. The font is YOURS: don't release() it while the UI
+  -- is using it (the reason the library creates its own font by default —
+  -- see NewFrame()'s "the UI owns its font" comment).
+  FontDefault = nil,
 }
 
 --------------------------------------------------------------------------------
@@ -107,7 +124,8 @@ local ctx = {
   frame       = 0,     -- frame counter; windows stamp it when submitted
   inFrame     = false, -- true between NewFrame() and Render()
   baseFont    = nil,   -- the library's own lazily-created 13px font (see
-                       -- NewFrame()'s "the UI owns its font" comment)
+                       -- NewFrame()'s "the UI owns its font" comment);
+                       -- only the fallback when io.FontDefault is nil
   font        = nil,   -- the CURRENT font: baseFont, or whatever PushFont()
                        -- last pushed — every measuring call (textSize(),
                        -- frameHeight(), a widget's own ctx.font:getWidth()/
@@ -210,6 +228,17 @@ end
 
 local function pointIn(px, py, x, y, w, h)
   return px >= x and px < x + w and py >= y and py < y + h
+end
+
+-- Duck-typed "is this a font?" check, shared by PushFont() and NewFrame()'s
+-- io.FontDefault validation: every real call site only ever calls
+-- font:getWidth()/getHeight(), never anything more specific, so checking
+-- for those (rather than LÖVE's Font userdata type) keeps hand-built stub
+-- fonts (see tests) working too.
+local function isFontLike(font)
+  return font ~= nil
+    and (type(font) == "userdata" or type(font) == "table")
+    and font.getWidth ~= nil and font.getHeight ~= nil
 end
 
 -- Which screen edge's snap zone the given mouse x is inside: "left",
@@ -681,14 +710,29 @@ function imlove.NewFrame()
   if ctx.inFrame then
     error("imlove.NewFrame() called twice without imlove.Render() in between", 2)
   end
+  -- io.FontDefault is validated BEFORE any frame state is touched, every
+  -- frame, so a bogus assignment fails loudly at the next NewFrame() —
+  -- not frames later deep inside textSize() — and RECOVERABLY: fix the
+  -- field and the following NewFrame() works normally.
+  local base = imlove.io.FontDefault
+  if base ~= nil and not isFontLike(base) then
+    error("imlove.NewFrame(): io.FontDefault must be a LÖVE Font object "
+      .. "or nil, got " .. type(base), 2)
+  end
   ctx.frame = ctx.frame + 1
   ctx.inFrame = true
   -- The UI owns its font. Adopting the game's current font here (as v1.0.0
   -- did) is a trap: the game may release() that font at any time — e.g. a
   -- scene unloading — and the UI would then draw with a dead object.
-  ctx.baseFont = ctx.baseFont or love.graphics.newFont(13)
-  ctx.font = ctx.baseFont -- reset to the base font each frame; PushFont()
-                          -- inside the frame is always balanced by Render()
+  -- io.FontDefault is the sanctioned exception: a font the host explicitly
+  -- HANDED to the UI (typically one with symbol fallbacks — see its doc
+  -- comment), which makes not releasing it the host's responsibility.
+  if not base then
+    ctx.baseFont = ctx.baseFont or love.graphics.newFont(13)
+    base = ctx.baseFont
+  end
+  ctx.font = base -- reset to the base font each frame; PushFont()
+                  -- inside the frame is always balanced by Render()
 
   -- Settings persistence: load once, lazily, the very first frame (never
   -- again after that — see LoadIniSettings() for reloading on demand).
@@ -1060,6 +1104,14 @@ local function snapWindow(win, side)
   if not win.snap then
     win.preSnapSizeMode = win.sizeMode
     win.preSnapH = win.h
+  end
+  if win.collapsed and win.sizeMode ~= "fixed" then
+    -- Snapping a COLLAPSED auto-fit window: its width shrank to fit just
+    -- the title while collapsed, and pinning would freeze that sliver as
+    -- the panel's width forever (no grip to widen it). Clear it so the
+    -- pin's one-frame auto-fit settle (see Begin()) re-measures the
+    -- un-collapsed content first.
+    win.w = 0
   end
   win.snap = side
   win.collapsed = false -- a snapped window has no collapse arrow
@@ -1502,8 +1554,16 @@ function imlove.Begin(title, open, flags)
       -- window comes free immediately (restoring its pre-snap height) and
       -- follows the mouse from here — no release needed. While the mouse
       -- stays inside the zone, the pin below re-asserts the geometry and
-      -- the window doesn't budge.
-      unsnapWindow(win)
+      -- the window doesn't budge. The distance check is what makes a
+      -- CLICK on a snapped title bar harmless: the grab point is almost
+      -- never inside the 12px zone itself, so "outside the zone" alone
+      -- would unsnap on the mere press — the mouse must also have pulled
+      -- more than snapZone pixels from where it grabbed.
+      local dx = ctx.mouse.x - (win.dragStartMX or ctx.mouse.x)
+      local dy = ctx.mouse.y - (win.dragStartMY or ctx.mouse.y)
+      if dx * dx + dy * dy > style.snapZone * style.snapZone then
+        unsnapWindow(win)
+      end
     end
     if ctx.mouse.released then
       -- The title-bar drag ends this frame: settle here instead of
@@ -1546,7 +1606,7 @@ function imlove.Begin(title, open, flags)
   -- is frozen at what it was when it snapped.
   local resizable = not flagSet.NoResize and not flagSet.AlwaysAutoResize
     and not win.snap
-  if resizable then
+  if resizable and not win.collapsed then
     local gs = style.gripSize
     local gx = win.x + win.w - gs
     local gy = win.y + win.h - gs
@@ -1605,15 +1665,22 @@ function imlove.Begin(title, open, flags)
       releaseIfActive(makeId("#COLLAPSE"))
       win.collapsed = false
     end
-    local cx, cy, r = win.x + ah * 0.5, win.y + ah * 0.5, ah * 0.24
-    if win.collapsed then -- arrow points right
-      pushTriangle(win, cx - r * 0.6, cy - r, cx - r * 0.6, cy + r,
-        cx + r, cy, style.colors.text)
-    else                  -- arrow points down
-      pushTriangle(win, cx - r, cy - r * 0.6, cx + r, cy - r * 0.6,
-        cx, cy + r, style.colors.text)
+    -- The arrow glyph stays visible (inert) on a "NoCollapse" window, but
+    -- a SNAPPED window hides it entirely — an arrow that does nothing on a
+    -- pinned side panel reads as a broken button — and the title slides
+    -- left into the freed space.
+    if not win.snap then
+      local cx, cy, r = win.x + ah * 0.5, win.y + ah * 0.5, ah * 0.24
+      if win.collapsed then -- arrow points right
+        pushTriangle(win, cx - r * 0.6, cy - r, cx - r * 0.6, cy + r,
+          cx + r, cy, style.colors.text)
+      else                  -- arrow points down
+        pushTriangle(win, cx - r, cy - r * 0.6, cx + r, cy - r * 0.6,
+          cx, cy + r, style.colors.text)
+      end
     end
-    pushText(win, displayTitle, win.x + ah + 2, win.y + fpy, style.colors.text)
+    pushText(win, displayTitle, win.x + (win.snap and fpx or ah + 2),
+      win.y + fpy, style.colors.text)
 
     -- Close button: a small X at the title bar's right edge, only when the
     -- caller passed an `open` value (nil means "no close button", as today).
@@ -1649,6 +1716,10 @@ function imlove.Begin(title, open, flags)
       ctx.dragWindow = win
       win.dragOffsetX = ctx.mouse.x - win.x
       win.dragOffsetY = ctx.mouse.y - win.y
+      -- Where the grab happened, for the snapped-drag distance check
+      -- above: a snapped window only comes free once the mouse has pulled
+      -- far enough from this point.
+      win.dragStartMX, win.dragStartMY = ctx.mouse.x, ctx.mouse.y
     end
   else
     win.titleCmd = nil
@@ -1659,8 +1730,10 @@ function imlove.Begin(title, open, flags)
   end
 
   -- The resize grip itself: drawn last so it sits in front of the border
-  -- End() will add, in the bottom-right corner.
-  if resizable then
+  -- End() will add, in the bottom-right corner. A collapsed window draws
+  -- (and hit-tests, above) no grip: its bottom-right corner is wherever
+  -- win.h says, far below the title bar that's actually visible.
+  if resizable and not win.collapsed then
     local gs = style.gripSize
     pushTriangle(win, win.x + win.w, win.y + win.h - gs,
       win.x + win.w - gs, win.y + win.h,
@@ -1678,7 +1751,8 @@ function imlove.Begin(title, open, flags)
   win.prevItem = { x = win.innerX, y = win.nextY, w = 0, h = 0,
     hovered = false, active = false, clicked = false }
   win.contentMaxX = hasTitleBar
-    and (win.x + ah + 2 + ctx.font:getWidth(displayTitle) + fpx)
+    and (win.x + (win.snap and fpx or ah + 2)
+      + ctx.font:getWidth(displayTitle) + fpx)
     or win.x
   win.contentMaxY = win.y + win.titleBarH
 
@@ -1760,8 +1834,14 @@ function imlove.End()
     win.scrollY = clamp(win.scrollY, 0, maxScroll)
   end
 
-  -- Patch the rects whose width/height weren't known in Begin().
-  win.bgCmd.w, win.bgCmd.h = win.w, win.h
+  -- Patch the rects whose width/height weren't known in Begin(). A
+  -- collapsed window DRAWS only its title bar no matter what win.h says:
+  -- for a fixed-size window, win.h keeps holding the size to restore on
+  -- un-collapse (auto-fit windows already shrank win.h itself above), so
+  -- the background and border must not read it while collapsed —
+  -- hit-testing already agrees, see windowRect().
+  local drawnH = win.collapsed and win.titleBarH or win.h
+  win.bgCmd.w, win.bgCmd.h = win.w, drawnH
   if win.titleCmd then win.titleCmd.w = win.w end
   win.lastChildRects = win.childRectList
 
@@ -1781,7 +1861,7 @@ function imlove.End()
       win.x, win.y + win.titleBarH, win.w, trackH, win)
   end
 
-  pushRect(win, "line", win.x, win.y, win.w, win.h,
+  pushRect(win, "line", win.x, win.y, win.w, drawnH,
     style.colors.border, style.rounding)
 
   ctx.currentWindow = nil
@@ -1812,10 +1892,12 @@ end
 --- to that edge at the full screen height (re-derived every frame, so it
 --- tracks OS window resizes); only its width — the width it had when it
 --- snapped — stays its own. Its collapse arrow and resize grip disappear,
---- but the title bar still drags: pulling the mouse out of the edge zone
---- unsnaps the window (restoring its pre-snap height) and it follows the
---- drag from there. Users can also snap any window themselves by dragging
---- its title bar until the mouse is within GetStyle().snapZone pixels of a
+--- but the title bar still drags: once the drag pulls the mouse out of the
+--- edge zone AND more than GetStyle().snapZone pixels from where it
+--- grabbed, the window unsnaps (restoring its pre-snap height) and follows
+--- the drag from there — a plain click or sloppy wiggle on the title bar
+--- leaves it snapped. Users can also snap any window themselves by
+--- dragging its title bar until the mouse is within snapZone pixels of a
 --- screen edge and releasing.
 ---
 --- cond is "always" (default: re-asserted every frame — a dragged-free
@@ -3739,12 +3821,8 @@ function imlove.PushFont(font)
   -- this, PushFont(nil) (or any non-Font value) doesn't fail here — it fails
   -- frames later, deep inside textSize() or Render(), with a raw "attempt to
   -- index a nil value" that gives no hint PushFont() was the actual mistake.
-  -- Duck-typed (getWidth/getHeight) rather than checking for LÖVE's Font
-  -- userdata type specifically, so hand-built stub fonts (see tests) work
-  -- too — every real call site only ever calls font:getWidth()/getHeight(),
-  -- never anything more specific.
-  if not (font and (type(font) == "userdata" or type(font) == "table")
-      and font.getWidth and font.getHeight) then
+  -- (isFontLike() explains the duck typing.)
+  if not isFontLike(font) then
     error("imlove.PushFont(): expected a LÖVE Font object", 2)
   end
   ctx.fontStack[#ctx.fontStack + 1] = ctx.font
