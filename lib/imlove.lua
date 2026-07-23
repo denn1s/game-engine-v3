@@ -37,7 +37,7 @@ Two classic IMGUI idioms show up throughout, worth knowing:
 MIT License — see LICENSE.
 ------------------------------------------------------------------------------]]
 
-local imlove = { _VERSION = "1.0.0" }
+local imlove = { _VERSION = "1.5.0" }
 
 -- io mirrors Dear ImGui's ImGuiIO flags. After NewFrame() these tell the host
 -- game whether the UI wants the mouse/keyboard this frame, so the game can
@@ -46,7 +46,14 @@ local imlove = { _VERSION = "1.0.0" }
 -- more convenient form in LÖVE callbacks.
 imlove.io = {
   WantCaptureMouse    = false,
-  WantCaptureKeyboard = false, -- always false in v1: no keyboard widgets yet
+  WantCaptureKeyboard = false, -- true while InputText/InputFloat/InputInt (or
+                               -- a ctrl-clicked slider/drag) has focus
+  -- Settings persistence (see "Settings persistence" below, and
+  -- SaveIniSettings()/LoadIniSettings()): the file window position/size/
+  -- collapsed state is saved to and loaded from, via love.filesystem.
+  -- Mirrors ImGui's io.IniFilename. Set to nil or false before your first
+  -- NewFrame() to disable persistence entirely.
+  IniFilename = "imlove.ini",
 }
 
 --------------------------------------------------------------------------------
@@ -64,6 +71,8 @@ local style = {
   grabWidth     = 10,       -- width of a slider's grab handle
   rounding      = 3,        -- corner radius on frames and windows
   minWindowWidth = 60,
+  scrollbarWidth = 10,      -- width of a window/child's scrollbar track
+  gripSize       = 14,      -- side length of the resize-grip corner triangle
 
   colors = {
     text             = { 0.92, 0.92, 0.92, 1.00 },
@@ -83,6 +92,7 @@ local style = {
     header           = { 0.26, 0.59, 0.98, 0.31 }, -- selected Selectable
     headerHovered    = { 0.26, 0.59, 0.98, 0.55 },
     separator        = { 0.43, 0.43, 0.50, 0.50 },
+    textDisabled     = { 0.50, 0.50, 0.50, 1.00 },
   },
 }
 
@@ -93,29 +103,95 @@ local style = {
 local ctx = {
   frame       = 0,     -- frame counter; windows stamp it when submitted
   inFrame     = false, -- true between NewFrame() and Render()
-  font        = nil,   -- font captured at NewFrame(), used for all measuring
+  baseFont    = nil,   -- the library's own lazily-created 13px font (see
+                       -- NewFrame()'s "the UI owns its font" comment)
+  font        = nil,   -- the CURRENT font: baseFont, or whatever PushFont()
+                       -- last pushed — every measuring call (textSize(),
+                       -- frameHeight(), a widget's own ctx.font:getWidth()/
+                       -- getHeight()) reads this, so a PushFont() takes
+                       -- effect for layout immediately, not just drawing
+  fontStack   = {},    -- PushFont()/PopFont() stack of previously-active
+                       -- fonts, restored on PopFont(); must be empty by
+                       -- Render() (see PushFont())
+
+  -- Style (see the "Style" section below): PushStyleColor()/PushStyleVar()
+  -- are a single GLOBAL LIFO stack each (not per-window, unlike idStack),
+  -- because a themed span can freely cross window boundaries within a
+  -- frame. Both must be empty by Render(), exactly like fontStack above.
+  colorStack  = {},    -- { name = ..., old = <color table> } entries
+  varStack    = {},    -- { name = ..., old = <number or {x,y}> } entries
 
   windows     = {},    -- title -> persistent window state
   windowOrder = {},    -- draw order, back-to-front (last = front-most)
   windowCount = 0,     -- used to cascade default positions of new windows
 
-  currentWindow = nil, -- window between Begin()/End(), nil outside
+  currentWindow = nil, -- window (or child) between Begin()/End(), nil outside
   hoveredWindow = nil, -- front-most window under the mouse (last-frame rects)
   nextWindowPos = nil, -- pending SetNextWindowPos(), consumed by next Begin()
+  nextWindowSize = nil, -- pending SetNextWindowSize(), consumed by next Begin()
 
   idStack   = {},      -- see PushID(); slot 1 is always the window's title
   activeId  = nil,     -- id of the widget being held with the mouse, if any
   hoveredId = nil,     -- id of the widget under the mouse this frame, if any
   dragWindow = nil,    -- window being dragged by its title bar, if any
+  resizeWindow = nil,  -- window being resized via its corner grip, if any
 
-  openNodes = {},      -- TreeNode id -> true while open (persists over frames)
+  openNodes = {},      -- TreeNode/CollapsingHeader id -> true while open
+  dragAnchor = nil,    -- { id, x, value } drag origin for DragFloat/DragInt
+
+  -- Keyboard focus & text editing (see "Text input" section): at most one
+  -- widget — InputText/InputFloat/InputInt, or a ctrl-clicked slider/drag —
+  -- holds focus at a time, exactly like activeId but persistent across
+  -- frames (mouse up) until explicitly released (Enter/Escape/click-away/
+  -- stopped being submitted).
+  focusId       = nil, -- id of the focused widget, if any
+  focusRect     = nil, -- { x, y, w, h } screen rect it last drew at, for
+                       -- click-away detection
+  focusStamp    = nil, -- ctx.frame it was last submitted, for stale cleanup
+  focusDefocusPending = false, -- NewFrame()'s click-away check sets this
+                       -- INSTEAD OF clearing focus outright, so the still-
+                       -- focused widget gets one more chance, later this same
+                       -- frame, to drain ctx.frameEvents before it actually
+                       -- loses focus — otherwise a keystroke latched in the
+                       -- same poll as a defocusing click would be silently
+                       -- dropped (nobody left to claim it). The widget
+                       -- finishes the job by calling clearFocus() itself once
+                       -- it's done processing.
+  focusBlinkBase = nil, -- ctx.frame focus began, for the cursor blink cadence
+  editBuf       = nil, -- live text buffer (UTF-8 bytes) while focused
+  editCursor    = 0,   -- cursor position, in CHARACTERS (not bytes)
+  editOriginal  = nil, -- value at the moment focus was gained (Escape revert)
+  editScrollX   = 0,   -- horizontal scroll offset inside the field, in pixels
+  inputEvents   = {},  -- keypressed()/textinput() latch: ordered queue of
+                       -- { kind = "text", text = ... } / { kind = "key",
+                       -- key = ... }, applied by the next NewFrame()
+  frameEvents   = {},  -- this frame's queue, drained by the focused widget
+
+  -- Popups & tooltips (see the "Popups & tooltips" section below): drawn in
+  -- an overlay band above every window, and hit-tested before them.
+  popups     = {},     -- resolved popup id -> persistent { win, kind, ... }
+  popupOrder = {},     -- open popup ids, oldest/bottommost first (last =
+                       -- topmost) — also the z-order Render() plays back
+  tooltipWin = nil,    -- the one persistent tooltip "window", reused by
+                       -- every SetTooltip()/BeginTooltip() call
 
   -- Mouse state. LÖVE delivers presses/releases as events between frames, so
   -- the forwarding functions only *latch* them here; NewFrame() converts each
   -- latch into a one-frame `pressed`/`released` flag that widgets read.
-  mouse = { x = 0, y = 0, down = false, pressed = false, released = false },
-  pressLatch   = false,
-  releaseLatch = false,
+  mouse = { x = 0, y = 0, down = false, pressed = false, released = false,
+    rightPressed = false },
+  pressLatch      = false,
+  releaseLatch    = false,
+  rightPressLatch = false, -- right-button press latch, for BeginPopupContextItem
+  wheelLatch      = 0, -- accumulated wheelmoved() dy, consumed by NewFrame()
+
+  -- Settings persistence (see the "Settings persistence" section below).
+  iniLoaded  = false, -- whether the lazy first-NewFrame() load has run yet
+  iniEntries = nil,   -- title -> {x, y, w, h, sized, collapsed}, from the
+                      -- most recently loaded ini file; consulted by Begin()
+                      -- when a window is first created (or re-applied to
+                      -- already-existing windows by LoadIniSettings())
+  iniDirty   = false, -- true when something changed that's worth writing
 }
 
 --------------------------------------------------------------------------------
@@ -186,7 +262,9 @@ end
 
 local function pushText(win, text, x, y, color)
   win.drawList[#win.drawList + 1] = { kind = "text", text = text,
-    x = math.floor(x + 0.5), y = math.floor(y + 0.5), color = color }
+    x = math.floor(x + 0.5), y = math.floor(y + 0.5), color = color,
+    font = ctx.font } -- captured now, so a later PopFont() doesn't change
+                      -- how already-submitted text is drawn (see PushFont())
 end
 
 local function pushTriangle(win, x1, y1, x2, y2, x3, y3, color)
@@ -197,6 +275,24 @@ end
 local function pushLine(win, x1, y1, x2, y2, color)
   win.drawList[#win.drawList + 1] = { kind = "line", color = color,
     x1 = x1, y1 = y1, x2 = x2, y2 = y2 }
+end
+
+local function pushCircle(win, mode, x, y, r, color)
+  win.drawList[#win.drawList + 1] = { kind = "circle", mode = mode,
+    x = x, y = y, r = r, color = color }
+end
+
+-- Push/pop a clip rectangle. Render() maintains a stack of these and
+-- intersects nested rects, so a clip pushed by a fixed-size window's content
+-- region and a BeginChild() inside it combine correctly. Widgets between a
+-- push/pop pair are what actually get scissored; see Render().
+local function pushClip(win, x, y, w, h)
+  win.drawList[#win.drawList + 1] = { kind = "clipPush", x = x, y = y,
+    w = w, h = h }
+end
+
+local function popClip(win)
+  win.drawList[#win.drawList + 1] = { kind = "clipPop" }
 end
 
 --------------------------------------------------------------------------------
@@ -235,6 +331,93 @@ local function bringToFront(win)
 end
 
 --------------------------------------------------------------------------------
+-- Popup bookkeeping used by hit-testing and NewFrame() (must come before
+-- Frame lifecycle, below, since NewFrame() calls into it). The functions
+-- that actually BUILD a popup's contents — beginPopupContent()/
+-- endPopupContent() — live further down, right before Begin()/End(), since
+-- they need pushRect()/itemAdd()/style, and the public
+-- OpenPopup()/BeginPopup()/EndPopup()/SetTooltip() API sits there too.
+--------------------------------------------------------------------------------
+
+-- What's currently open, for Begin()/End()/Render()'s "you forgot to close
+-- something" errors — one place so all three agree on wording.
+local function whatIsOpen(win)
+  if win.isChild then
+    return "BeginChild('" .. win.idStr .. "') is open — missing imlove.EndChild()"
+  elseif win.isTooltip then
+    return "a tooltip is open — missing imlove.EndTooltip()"
+  elseif win.isPopup then
+    return "a popup is open — missing imlove.EndPopup()"
+  else
+    return "window '" .. win.title .. "' is open — missing imlove.End()"
+  end
+end
+
+-- OpenPopup(strId)/BeginPopup(strId) share an id the same way any other
+-- widget does: the current ID stack (window/PushID/BeginPopup scope) joined
+-- with the string, via the same makeId() every widget uses. Two windows
+-- each calling OpenPopup("options") get two different popups; a
+-- BeginPopup("options") called from the same scope as the OpenPopup() that
+-- opened it always finds it.
+local function popupId(strId)
+  return makeId(tostring(strId))
+end
+
+local function popupIsOpen(id)
+  for i = 1, #ctx.popupOrder do
+    if ctx.popupOrder[i] == id then return true end
+  end
+  return false
+end
+
+-- Marks a (resolved) id open: pushes it onto the top of the popup stack and
+-- captures where it should appear (anchorX/Y default to just past the
+-- mouse, SetTooltip()-style; Combo() passes its own box's position
+-- instead). ownerRect, if given (Combo() uses this), is a widget rectangle
+-- that counts as "inside" the popup for dismissal purposes, so clicking the
+-- combo box itself to close its dropdown is never also seen as an
+-- outside-dismiss click.
+local function openPopupById(id, kind, ownerRect, anchorX, anchorY)
+  if popupIsOpen(id) then return end
+  local p = ctx.popups[id] or { id = id }
+  ctx.popups[id] = p
+  p.kind = kind or "popup"
+  p.anchorX = anchorX or ctx.mouse.x + 12
+  p.anchorY = anchorY or ctx.mouse.y + 12
+  p.justOpened = true
+  p.ownerRect = ownerRect
+  ctx.popupOrder[#ctx.popupOrder + 1] = id
+end
+
+local function closePopup(id)
+  for i = 1, #ctx.popupOrder do
+    if ctx.popupOrder[i] == id then
+      table.remove(ctx.popupOrder, i)
+      return
+    end
+  end
+end
+
+-- Frontmost popup/modal under the point — popups are hit-tested BEFORE
+-- regular windows, topmost (most recently opened) first (see NewFrame()).
+-- Never returns the tooltip; it is never hit-testable (see SetTooltip()).
+-- The second return, `blocked`, is true when the point fell through to an
+-- open modal without landing on it (or on anything stacked above it): the
+-- modal still swallows the click/hover, but nothing underneath — not even a
+-- regular window — counts as "hit".
+local function popupAt(x, y)
+  for i = #ctx.popupOrder, 1, -1 do
+    local p = ctx.popups[ctx.popupOrder[i]]
+    local win = p and p.win
+    if win and win.lastFrame and win.lastFrame >= ctx.frame - 1 then
+      if pointIn(x, y, win.x, win.y, win.w, win.h) then return p end
+      if p.kind == "modal" then return nil, true end
+    end
+  end
+  return nil, false
+end
+
+--------------------------------------------------------------------------------
 -- Widget behavior: the hot/active logic shared by every clickable widget.
 --
 -- Given the widget's rectangle, returns three booleans:
@@ -245,12 +428,26 @@ end
 --   pressed — the mouse was released over it this frame while held: a click.
 --------------------------------------------------------------------------------
 
+-- A widget is only hoverable while the mouse is within its window's current
+-- clip rect (nil = unclipped, the common case). This is what keeps a
+-- BeginChild() row that has scrolled out of view — or content of a
+-- fixed-size window scrolled past its bottom edge — from still receiving
+-- clicks meant for whatever it's hidden behind.
+local function withinClip(win, x, y)
+  local clip = win.clipRect
+  return not clip or pointIn(x, y, clip.x, clip.y, clip.w, clip.h)
+end
+
 local function behavior(win, id, x, y, w, h)
   local m = ctx.mouse
-  local hovered = ctx.hoveredWindow == win
+  -- A child window shares its root's hover/z-order: behavior() always
+  -- compares against the ROOT window, since ctx.hoveredWindow is only ever
+  -- set to root-level windows (see windowAt()).
+  local hovered = ctx.hoveredWindow == (win.root or win)
     and ctx.dragWindow == nil
     and (ctx.activeId == nil or ctx.activeId == id)
     and pointIn(m.x, m.y, x, y, w, h)
+    and withinClip(win, m.x, m.y)
 
   if hovered then ctx.hoveredId = id end
 
@@ -265,6 +462,97 @@ local function behavior(win, id, x, y, w, h)
   end
 
   return hovered, ctx.activeId == id, pressed
+end
+
+-- A widget's region can become disabled between one frame and the next while
+-- it is held — e.g. a window's flags flip to "NoResize" mid-drag, or its
+-- "open" argument stops being passed so the close button disappears. If the
+-- disabled region simply stops calling behavior(), nothing ever clears
+-- ctx.activeId, and since behavior()'s hover gate is
+-- `activeId == nil or activeId == id`, EVERY widget in EVERY window stops
+-- responding until a fully idle frame (no press/release, mouse up) happens.
+-- Disabled regions must explicitly give up any stale claim instead of
+-- silently going quiet.
+local function releaseIfActive(id)
+  if ctx.activeId == id then ctx.activeId = nil end
+end
+
+--------------------------------------------------------------------------------
+-- Keyboard focus lifecycle. See the ctx.focus*/ctx.edit* fields above and the
+-- "Text input" section further down for the widgets that use this. Lives
+-- here, ahead of NewFrame(), because NewFrame() itself needs setFocus()/
+-- clearFocus() for click-away detection, modal lockout, and stale cleanup.
+--------------------------------------------------------------------------------
+
+-- "utf8" is part of PUC Lua 5.3+ (what LÖVE 11 embeds) but NOT plain LuaJIT
+-- (what the headless tests run under) — hence the pcall and the pure-Lua
+-- fallback below, both of which must agree on every position.
+local utf8ok, utf8lib = pcall(require, "utf8")
+
+-- Character count of a UTF-8 string. The fallback counts only lead bytes
+-- (< 0x80 or >= 0xC0), skipping continuation bytes (0x80-0xBF).
+local function utf8Len(s)
+  if utf8ok then return utf8lib.len(s) or #s end
+  local n = 0
+  for i = 1, #s do
+    local b = s:byte(i)
+    if b < 0x80 or b >= 0xC0 then n = n + 1 end
+  end
+  return n
+end
+
+-- Byte offset of the character at 0-based character index charIdx — i.e. the
+-- split point so that s:sub(1, offset - 1) is exactly the first charIdx
+-- characters. charIdx == utf8Len(s) (cursor at the very end) returns #s + 1.
+local function utf8Offset(s, charIdx)
+  if charIdx <= 0 then return 1 end
+  if utf8ok then
+    local ok, off = pcall(utf8lib.offset, s, charIdx + 1)
+    if ok and off then return off end
+    return #s + 1
+  end
+  local n = 0
+  for i = 1, #s do
+    local b = s:byte(i)
+    if b < 0x80 or b >= 0xC0 then
+      n = n + 1
+      if n == charIdx + 1 then return i end
+    end
+  end
+  return #s + 1
+end
+
+local function ctrlHeld()
+  return love.keyboard and love.keyboard.isDown
+    and (love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl"))
+end
+
+-- Gives a widget keyboard focus, seeding the live edit buffer. `original` is
+-- what Escape reverts to — a string for InputText, a number for the numeric
+-- editors — kept separate from `bufText` (always a string) so a numeric
+-- revert never round-trips through its formatted display and loses
+-- precision.
+local function setFocus(id, bufText, original)
+  ctx.focusId = id
+  ctx.editBuf = bufText
+  ctx.editCursor = utf8Len(bufText)
+  ctx.editOriginal = original
+  ctx.focusStamp = ctx.frame
+  ctx.focusBlinkBase = ctx.frame
+  ctx.editScrollX = 0
+  ctx.focusDefocusPending = false
+end
+
+local function clearFocus()
+  ctx.focusId = nil
+  ctx.focusRect = nil
+  ctx.focusStamp = nil
+  ctx.focusDefocusPending = false
+  ctx.focusBlinkBase = nil
+  ctx.editBuf = nil
+  ctx.editCursor = 0
+  ctx.editOriginal = nil
+  ctx.editScrollX = 0
 end
 
 --------------------------------------------------------------------------------
@@ -293,11 +581,41 @@ local function itemAdd(win, w, h)
   return x, y
 end
 
+-- Stashes the just-placed item's interactive state so IsItemHovered() /
+-- IsItemActive() / IsItemClicked() can answer without every call site
+-- re-deriving it. "clicked" means the widget's own notion of a completed
+-- click (what it returns as pressed/changed), not merely a mouse-down.
+local function recordItem(win, hovered, active, clicked)
+  win.prevItem.hovered = hovered
+  win.prevItem.active  = active
+  win.prevItem.clicked = clicked
+end
+
+-- Same as itemAdd(), for widgets with no behavior() of their own (Text and
+-- friends, Separator, Dummy, ...). They still report IsItemHovered() from
+-- geometry alone, gated the same way behavior() gates hovered: only the
+-- front window, only while no other widget is held.
+local function itemAddPassive(win, w, h)
+  local x, y = itemAdd(win, w, h)
+  local hovered = ctx.hoveredWindow == (win.root or win) and ctx.dragWindow == nil
+    and ctx.activeId == nil
+    and pointIn(ctx.mouse.x, ctx.mouse.y, x, y, w, h)
+    and withinClip(win, ctx.mouse.x, ctx.mouse.y)
+  recordItem(win, hovered, false, false)
+  return x, y
+end
+
 -- Width available for widgets that stretch across the window (Selectable,
--- Separator). Uses last frame's window width — the one-frame lag again.
+-- Separator). Uses last frame's window width — the one-frame lag again —
+-- and, the same way, last frame's "did this window/child show a scrollbar"
+-- flag: when it did, the content region must stop short of the scrollbar
+-- track (reserving its full width plus the usual padding gap), or a
+-- full-width widget's own behavior() region overlaps the track and steals
+-- clicks meant for the scrollbar.
 local function availWidth(win)
   local x = win.innerX + win.indent
-  local right = win.x + win.w - style.windowPadding
+  local right = win.x + win.w - win.pad
+  if win.hasScrollbar then right = right - style.scrollbarWidth end
   return math.max(right - x, 0)
 end
 
@@ -307,6 +625,32 @@ local function requireWindow(name)
     error("imlove." .. name .. "() called outside a Begin()/End() pair", 3)
   end
   return win
+end
+
+-- Applies a latched wheel delta to whatever is under the mouse: a
+-- BeginChild() region if the point falls inside one (the innermost —
+-- smallest-area — match wins, so a child nested inside another scrolls
+-- itself rather than its parent), the window itself otherwise. Uses last
+-- frame's rects/content sizes, same one-frame lag as hit-testing.
+local function applyWheel(win, dy)
+  if win.flags and win.flags.AlwaysAutoResize then return end -- never overflows
+  local target = win
+  if win.lastChildRects then
+    local bestArea
+    for i = 1, #win.lastChildRects do
+      local r = win.lastChildRects[i]
+      if pointIn(ctx.mouse.x, ctx.mouse.y, r.x, r.y, r.w, r.h) then
+        local area = r.w * r.h
+        if not bestArea or area < bestArea then
+          target, bestArea = win.childScroll[r.id], area
+        end
+      end
+    end
+  end
+  if not target then return end
+  local step = 3 * ctx.font:getHeight() -- ImGui scrolls ~3 lines per notch
+  local maxScroll = math.max((target.contentH or 0) - (target.visibleH or 0), 0)
+  target.scrollY = clamp((target.scrollY or 0) - dy * step, 0, maxScroll)
 end
 
 --------------------------------------------------------------------------------
@@ -324,12 +668,31 @@ function imlove.NewFrame()
   -- The UI owns its font. Adopting the game's current font here (as v1.0.0
   -- did) is a trap: the game may release() that font at any time — e.g. a
   -- scene unloading — and the UI would then draw with a dead object.
-  ctx.font = ctx.font or love.graphics.newFont(13)
+  ctx.baseFont = ctx.baseFont or love.graphics.newFont(13)
+  ctx.font = ctx.baseFont -- reset to the base font each frame; PushFont()
+                          -- inside the frame is always balanced by Render()
+
+  -- Settings persistence: load once, lazily, the very first frame (never
+  -- again after that — see LoadIniSettings() for reloading on demand).
+  -- ctx.windows is always empty at this point (Begin() can't have run
+  -- before the first NewFrame()), so there's nothing yet to re-apply to —
+  -- just seed ctx.iniEntries for Begin() to consult as windows are created.
+  if not ctx.iniLoaded then
+    ctx.iniLoaded = true
+    if imlove.io.IniFilename then imlove.LoadIniSettings() end
+  end
 
   local m = ctx.mouse
   m.x, m.y = love.mouse.getPosition()
   m.pressed, ctx.pressLatch = ctx.pressLatch, false
   m.released, ctx.releaseLatch = ctx.releaseLatch, false
+  m.rightPressed, ctx.rightPressLatch = ctx.rightPressLatch, false
+  local wheelDy = ctx.wheelLatch
+  ctx.wheelLatch = 0
+  -- Same latch-then-apply pattern for keypressed()/textinput(): this frame's
+  -- queue is whatever accumulated between the last frame and now, drained in
+  -- order by whichever widget holds focus (see the "Text input" section).
+  ctx.frameEvents, ctx.inputEvents = ctx.inputEvents, {}
 
   -- Safety net: if the mouse is up and there is no release event left to
   -- deliver, nothing can legitimately still be active. This unsticks widgets
@@ -337,61 +700,508 @@ function imlove.NewFrame()
   if not m.down and not m.released and not m.pressed then
     ctx.activeId = nil
     ctx.dragWindow = nil
+    ctx.resizeWindow = nil
+  end
+
+  -- A focused text field that stops being submitted (its window/popup
+  -- closed, or the caller just stopped calling it) must not hold keyboard
+  -- capture hostage forever — same lastFrame-staleness idea as windows and
+  -- popups above.
+  if ctx.focusId and not (ctx.focusStamp and ctx.focusStamp >= ctx.frame - 1) then
+    clearFocus()
+  end
+
+  -- Prune popups whose BeginPopup()/BeginPopupModal()/BeginPopupContextItem()
+  -- stopped being called — the caller stopped submitting them, same idea as
+  -- a window whose Begin() stops being called (see windowAt()) — otherwise
+  -- a stale entry would keep io.WantCaptureMouse stuck true and every press
+  -- captured forever.
+  for i = #ctx.popupOrder, 1, -1 do
+    local p = ctx.popups[ctx.popupOrder[i]]
+    local win = p and p.win
+    if not (win and win.lastFrame and win.lastFrame >= ctx.frame - 1) then
+      table.remove(ctx.popupOrder, i)
+    end
   end
 
   ctx.hoveredId = nil
-  ctx.hoveredWindow = windowAt(m.x, m.y)
-  if m.pressed and ctx.hoveredWindow then
+  -- Popups are hit-tested BEFORE regular windows, and a modal blocks
+  -- everything beneath it (see popupAt()).
+  local hitPopup, blocked = popupAt(m.x, m.y)
+  if hitPopup then
+    ctx.hoveredWindow = hitPopup.win
+  elseif blocked then
+    ctx.hoveredWindow = nil
+  else
+    ctx.hoveredWindow = windowAt(m.x, m.y)
+  end
+  if m.pressed and ctx.hoveredWindow and not ctx.hoveredWindow.isPopup then
     bringToFront(ctx.hoveredWindow)
+  end
+  if wheelDy ~= 0 and ctx.hoveredWindow then
+    applyWheel(ctx.hoveredWindow, wheelDy)
+  end
+
+  -- A modal dims and blocks EVERYTHING beneath it — including a title-bar
+  -- drag, a resize-grip drag, or a scrollbar drag that was already in
+  -- progress the moment it opened (none of those are hover-gated; they run
+  -- off ctx.dragWindow/ctx.resizeWindow/ctx.activeId directly, every frame,
+  -- regardless of ctx.hoveredWindow). Forcibly release those every frame a
+  -- modal is open, unless the claim belongs to the modal's own content (or
+  -- a popup opened from within it) — same idea as releaseIfActive(), just
+  -- keyed by an id-stack PREFIX since NewFrame() has no widget ids of its
+  -- own to compare against (see beginPopupContent()'s p.idPrefix).
+  local modalIdx
+  for i = 1, #ctx.popupOrder do
+    if ctx.popups[ctx.popupOrder[i]].kind == "modal" then
+      modalIdx = i
+      break
+    end
+  end
+  if modalIdx then
+    ctx.dragWindow = nil
+    ctx.resizeWindow = nil
+    if ctx.activeId then
+      local prefix = ctx.popups[ctx.popupOrder[modalIdx]].idPrefix
+      local ownedByModal = prefix
+        and ctx.activeId:sub(1, #prefix + 1) == (prefix .. "\31")
+      if not ownedByModal then ctx.activeId = nil end
+    end
+    if ctx.focusId then
+      local prefix = ctx.popups[ctx.popupOrder[modalIdx]].idPrefix
+      local ownedByModal = prefix
+        and ctx.focusId:sub(1, #prefix + 1) == (prefix .. "\31")
+      if not ownedByModal then clearFocus() end
+    end
+  end
+
+  -- Dismiss popups: a press — either mouse button — outside the topmost
+  -- open popup closes it, and everything stacked above whatever it DID
+  -- land on — so a press on a lower popup in a nested stack closes only
+  -- what's above that one. Modals are never dismissed this way — only
+  -- CloseCurrentPopup() closes them. The dismissing press is CONSUMED: it
+  -- must not ALSO activate whatever it just exposed underneath (a press)
+  -- or open a context menu on top of it (a right press reaching
+  -- BeginPopupContextItem()) later this same frame.
+  if (m.pressed or m.rightPressed) and #ctx.popupOrder > 0 then
+    local hitIndex, modalBlocked = nil, false
+    for i = #ctx.popupOrder, 1, -1 do
+      local id = ctx.popupOrder[i]
+      local p = ctx.popups[id]
+      local win = p.win
+      local hitWin = win and pointIn(m.x, m.y, win.x, win.y, win.w, win.h)
+      local hitOwner = p.ownerRect and pointIn(m.x, m.y, p.ownerRect.x,
+        p.ownerRect.y, p.ownerRect.w, p.ownerRect.h)
+      if hitWin or hitOwner then
+        hitIndex = i
+        break
+      end
+      if p.kind == "modal" then
+        modalBlocked = true
+        break
+      end
+    end
+    if not modalBlocked then
+      local toClose = {}
+      for i = #ctx.popupOrder, (hitIndex or 0) + 1, -1 do
+        toClose[#toClose + 1] = ctx.popupOrder[i]
+      end
+      if #toClose > 0 then
+        for i = 1, #toClose do closePopup(toClose[i]) end
+        m.pressed = false
+        m.rightPressed = false
+      end
+    end
+  end
+
+  -- A click anywhere outside the focused field defocuses it — but the click
+  -- itself is NOT consumed; it still reaches whatever it landed on (a
+  -- button, another field to focus instead, ...), same as clicking away from
+  -- an activeId widget always has. This does NOT clearFocus() outright: this
+  -- frame's ctx.frameEvents (just swapped in above) hasn't been drained yet —
+  -- that only happens later this same frame, inside whichever widget's own
+  -- `ctx.focusId == id` branch runs — so clearing focus here would leave a
+  -- keystroke latched in the same poll as the defocusing click with no owner
+  -- left to claim it. Flagging it instead lets that widget drain its events
+  -- first and finish the defocus itself once done (see processEditEvents()'s
+  -- callers). If the widget isn't submitted at all this frame, the
+  -- lastFrame-staleness check above already clears focus unconditionally —
+  -- dropping the event in that case is fine, since there's no field left to
+  -- receive it.
+  if ctx.focusId and m.pressed and ctx.focusRect then
+    local r = ctx.focusRect
+    if not pointIn(m.x, m.y, r.x, r.y, r.w, r.h) then
+      ctx.focusDefocusPending = true
+    end
   end
 
   imlove.io.WantCaptureMouse = ctx.hoveredWindow ~= nil
-    or ctx.activeId ~= nil or ctx.dragWindow ~= nil
-  imlove.io.WantCaptureKeyboard = false
+    or ctx.activeId ~= nil or ctx.dragWindow ~= nil or #ctx.popupOrder > 0
+  imlove.io.WantCaptureKeyboard = ctx.focusId ~= nil
 end
 
 --- Draw the UI. Call at the end of love.draw so the UI lands on top of the
---- game. Plays back every window's draw list in z-order. Equivalent of
+--- game. Plays back every window's draw list in z-order, then popups (see
+--- OpenPopup()/BeginPopup()) above all of them, then the tooltip (see
+--- SetTooltip()) last of all, above even popups. Equivalent of
 --- ImGui::Render() + backend draw.
 function imlove.Render()
   if not ctx.inFrame then return end -- nothing declared this frame; no-op
   if ctx.currentWindow then
-    error("imlove.Render() called with window '" .. ctx.currentWindow.title
-      .. "' still open — missing imlove.End()", 2)
+    error("imlove.Render() called while " .. whatIsOpen(ctx.currentWindow), 2)
+  end
+  -- PushStyleColor/PushStyleVar/PushFont are global (not per-window) stacks,
+  -- so — unlike idStack, which End()/EndChild()/EndPopup() each check as
+  -- soon as their own window closes — they can only be checked here, once,
+  -- after every window this frame has had a chance to pop what it pushed.
+  --
+  -- A forgotten Pop* must NOT brick the UI forever: fully unwind every
+  -- remaining entry first — restoring style.colors/style/ctx.font to what
+  -- they were before the offending push(es), in LIFO order, exactly like the
+  -- matching Pop* call would have — and reset the frame-transient state
+  -- below (ctx.inFrame) exactly as a clean Render() does, and ONLY THEN
+  -- error. A caller who pcalls Render() gets a loud error every offending
+  -- frame, but the UI keeps working and the theme/font stay uncorrupted,
+  -- instead of every following NewFrame() failing with "called twice" (the
+  -- error below left ctx.inFrame stuck true) while the shadowed style also
+  -- silently stayed corrupted forever.
+  local unbalanced = nil
+  if #ctx.colorStack > 0 then
+    unbalanced = (unbalanced and (unbalanced .. "; ") or "") ..
+      #ctx.colorStack .. " imlove.PushStyleColor() left unpopped"
+    for i = #ctx.colorStack, 1, -1 do
+      local entry = ctx.colorStack[i]
+      style.colors[entry.name] = entry.old
+      ctx.colorStack[i] = nil
+    end
+  end
+  if #ctx.varStack > 0 then
+    unbalanced = (unbalanced and (unbalanced .. "; ") or "") ..
+      #ctx.varStack .. " imlove.PushStyleVar() left unpopped"
+    for i = #ctx.varStack, 1, -1 do
+      local entry = ctx.varStack[i]
+      style[entry.name] = entry.old
+      ctx.varStack[i] = nil
+    end
+  end
+  if #ctx.fontStack > 0 then
+    unbalanced = (unbalanced and (unbalanced .. "; ") or "") ..
+      #ctx.fontStack .. " imlove.PushFont() left unpopped"
+    -- ctx.fontStack[1] is the outermost save -- the font that was active
+    -- before the FIRST unpopped PushFont() -- so it's what's left active
+    -- once every entry above it has unwound, same as popping down to it one
+    -- PopFont() at a time would leave.
+    ctx.font = ctx.fontStack[1]
+    for i = #ctx.fontStack, 1, -1 do ctx.fontStack[i] = nil end
   end
   ctx.inFrame = false
+  if unbalanced then
+    error("imlove.Render(): " .. unbalanced, 2)
+  end
 
   local g = love.graphics
   local pr, pg, pb, pa = g.getColor()
   local prevFont = g.getFont()
+  local psx, psy, psw, psh = g.getScissor()
   g.setFont(ctx.font)
+  local currentDrawFont = ctx.font -- tracks the font last handed to
+                                    -- g.setFont() during playback below, so a
+                                    -- PushFont() span only costs a setFont()
+                                    -- call where the font actually changes
 
-  for i = 1, #ctx.windowOrder do
-    local win = ctx.windowOrder[i]
-    if win.lastFrame == ctx.frame then
-      for j = 1, #win.drawList do
-        local c = win.drawList[j]
+  -- Clip stack: clipPush/clipPop commands nest, and each level is the
+  -- INTERSECTION with whatever was already scissored, so a BeginChild()
+  -- inside a scrolling window can never paint outside the window's own
+  -- content region either. Restored to the pre-Render() scissor (if any)
+  -- when the stack empties, exactly like the color/font save-restore above.
+  -- Shared across every draw list played back below (windows, then popups,
+  -- then the tooltip) so a clip pushed by one never leaks into the next.
+  local clipStack = {}
+
+  local function applyTopScissor()
+    local top = clipStack[#clipStack]
+    if top then
+      g.setScissor(top.x, top.y, top.w, top.h)
+    elseif psx then
+      g.setScissor(psx, psy, psw, psh)
+    else
+      g.setScissor()
+    end
+  end
+
+  local function playDrawList(drawList)
+    for j = 1, #drawList do
+      local c = drawList[j]
+      if c.kind == "clipPush" then
+        local nx, ny, nw, nh = c.x, c.y, c.w, c.h
+        local top = clipStack[#clipStack]
+        if top then
+          local x1, y1 = math.max(top.x, nx), math.max(top.y, ny)
+          local x2 = math.min(top.x + top.w, nx + nw)
+          local y2 = math.min(top.y + top.h, ny + nh)
+          nx, ny, nw, nh = x1, y1, math.max(x2 - x1, 0), math.max(y2 - y1, 0)
+        end
+        clipStack[#clipStack + 1] = { x = nx, y = ny, w = nw, h = nh }
+        applyTopScissor()
+      elseif c.kind == "clipPop" then
+        clipStack[#clipStack] = nil
+        applyTopScissor()
+      else
         g.setColor(c.color)
         if c.kind == "rect" then
           g.rectangle(c.mode, c.x, c.y, c.w, c.h, c.rounding, c.rounding)
         elseif c.kind == "text" then
+          if c.font and c.font ~= currentDrawFont then
+            g.setFont(c.font)
+            currentDrawFont = c.font
+          end
           g.print(c.text, c.x, c.y)
         elseif c.kind == "triangle" then
           g.polygon("fill", c.x1, c.y1, c.x2, c.y2, c.x3, c.y3)
         elseif c.kind == "line" then
           g.line(c.x1, c.y1, c.x2, c.y2)
+        elseif c.kind == "circle" then
+          g.circle(c.mode, c.x, c.y, c.r)
         end
       end
     end
   end
 
+  for i = 1, #ctx.windowOrder do
+    local win = ctx.windowOrder[i]
+    if win.lastFrame == ctx.frame then playDrawList(win.drawList) end
+  end
+
+  -- Overlay band: popups draw above every window, back-to-front in the same
+  -- open/nesting order as ctx.popupOrder (see OpenPopup()); the tooltip (at
+  -- most one, see SetTooltip()) draws last of all, above even popups.
+  for i = 1, #ctx.popupOrder do
+    local p = ctx.popups[ctx.popupOrder[i]]
+    if p and p.win and p.win.lastFrame == ctx.frame then
+      playDrawList(p.win.drawList)
+    end
+  end
+  local tip = ctx.tooltipWin
+  if tip and tip.lastFrame == ctx.frame then
+    playDrawList(tip.drawList)
+  end
+
+  if psx then g.setScissor(psx, psy, psw, psh) else g.setScissor() end
   g.setFont(prevFont)
   g.setColor(pr, pg, pb, pa)
+
+  -- Settings persistence: write-on-change, no debounce timer (see the
+  -- "Settings persistence" section above) — only actually touches disk
+  -- when something changed AND persistence is still enabled.
+  if ctx.iniDirty and imlove.io.IniFilename then
+    imlove.SaveIniSettings()
+  end
+end
+
+--------------------------------------------------------------------------------
+-- Settings persistence: ImGui's .ini behavior via love.filesystem. What
+-- persists, per window title, is position, collapsed state, and — only for
+-- a window that was ever given an EXPLICIT size (see the sizing model in
+-- Begin()'s doc comment) — its size. Popups, tooltips, and BeginChild()
+-- regions are never persisted; they aren't windows in ctx.windows/
+-- ctx.windowOrder to begin with. The caller-owned open/close (close-button)
+-- state is deliberately NOT persisted either, exactly like ImGui: `open` is
+-- yours to remember, not the library's.
+--
+-- Precedence when a window is first created (see Begin()): an "always"
+-- SetNextWindowPos()/SetNextWindowSize() always wins; a "once" one only
+-- wins when there is NO ini entry for that title — otherwise the ini
+-- position/size applies instead, exactly as if "once" had already fired
+-- once before your code ever ran. This falls out of reusing the same
+-- win.placed/win.sizePlaced bookkeeping Begin() already had for "once".
+--
+-- Lifecycle is deliberately simple, no timers: LOAD once, lazily, at the
+-- first NewFrame() (tolerating an absent or garbage file silently). SAVE
+-- write-on-change instead of ImGui's ~5s debounce: a title drag ending, a
+-- resize-grip drag ending, a collapse toggle, or a brand-new window all
+-- mark ctx.iniDirty, and Render() writes the whole file whenever it's
+-- dirty. Simpler than debouncing, at the cost of an extra disk write on
+-- some frames a real game would consider "still settling" — a fine trade
+-- for a debug UI, and documented as a deviation (see docs/imgui.md).
+--------------------------------------------------------------------------------
+
+-- Parses an ImGui-ini-flavored file defensively: unrecognized/malformed
+-- lines are simply ignored rather than erroring, and any block missing a
+-- Pos= line (a truncated or hand-edited file) is discarded entirely, so a
+-- garbage file just behaves like an empty/absent one.
+local function parseIniText(text)
+  local entries = {}
+  local current = nil
+  for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+    line = line:gsub("\r$", "")
+    local title = line:match("^%[Window%]%[(.*)%]$")
+    if title then
+      current = { collapsed = false }
+      entries[title] = current
+    elseif current then
+      local x, y = line:match("^Pos=([%-%d%.]+),([%-%d%.]+)$")
+      -- Each match() above/below is its own statement (not chained with
+      -- "and") so both capture groups survive: "and" truncates a multi-
+      -- value function call to its first result, which would silently
+      -- discard the second half of every Pos=/Size= pair.
+      local w, h
+      if not x then w, h = line:match("^Size=([%-%d%.]+),([%-%d%.]+)$") end
+      local c
+      if not x and not w then c = line:match("^Collapsed=(%d)$") end
+      if x then
+        current.x, current.y = tonumber(x), tonumber(y)
+      elseif w then
+        current.w, current.h = tonumber(w), tonumber(h)
+        current.sized = true
+      elseif c then
+        current.collapsed = c ~= "0"
+      end
+    end
+  end
+  for title, e in pairs(entries) do
+    if not e.x or not e.y then entries[title] = nil end -- incomplete: discard
+  end
+  return entries
+end
+
+-- The inverse of parseIniText(): one [Window][Title] block per window ever
+-- created this session (ctx.windowOrder — root windows only, see above),
+-- in the same z-order they're kept in (harmless; ImGui's own order isn't
+-- meaningful either, since Begin()/End() never reads back by position).
+local function serializeIniText()
+  local lines = {}
+  for i = 1, #ctx.windowOrder do
+    local win = ctx.windowOrder[i]
+    lines[#lines + 1] = "[Window][" .. win.title .. "]"
+    lines[#lines + 1] = string.format("Pos=%d,%d",
+      math.floor(win.x + 0.5), math.floor(win.y + 0.5))
+    if win.sizeMode == "fixed" then
+      lines[#lines + 1] = string.format("Size=%d,%d",
+        math.floor(win.w + 0.5), math.floor(win.h + 0.5))
+    end
+    if win.collapsed then
+      lines[#lines + 1] = "Collapsed=1"
+    end
+    lines[#lines + 1] = ""
+  end
+  return table.concat(lines, "\n")
+end
+
+-- Applies one parsed entry to an already-existing window table (used both
+-- by Begin() the moment a window is first created, and by
+-- LoadIniSettings() reapplying a freshly (re)loaded file to windows that
+-- already exist). Sets win.placed/win.sizePlaced the same way a consumed
+-- SetNextWindowPos()/SetNextWindowSize() "once" would, so a later "once"
+-- call correctly finds itself too late (see the precedence note above).
+local function applyIniEntryToWindow(win)
+  local entry = ctx.iniEntries and ctx.iniEntries[win.title]
+  if not entry then return end
+  win.x, win.y = entry.x, entry.y
+  win.placed = true
+  win.collapsed = entry.collapsed or false
+  if entry.sized then
+    win.w, win.h = entry.w, entry.h
+    win.sizeMode = "fixed"
+    win.sizePlaced = true
+  end
+end
+
+--- Manually write the current window settings (position, collapsed state,
+--- and size for any explicitly-sized window) to disk now, bypassing the
+--- normal write-on-change lifecycle. filename defaults to
+--- imlove.io.IniFilename; a no-op if that's also nil/false, or if
+--- love.filesystem isn't available. Equivalent of
+--- ImGui::SaveIniSettingsToDisk().
+function imlove.SaveIniSettings(filename)
+  filename = filename or imlove.io.IniFilename
+  if not filename then return end
+  if not (love and love.filesystem and love.filesystem.write) then return end
+  love.filesystem.write(filename, serializeIniText())
+  ctx.iniDirty = false
+end
+
+--- Manually (re)load window settings from disk now and apply them to any
+--- window that already exists, in addition to seeding windows created from
+--- here on (exactly like the lazy load NewFrame() performs once at
+--- startup). filename defaults to imlove.io.IniFilename; a no-op if that's
+--- also nil/false, if love.filesystem isn't available, or if the file is
+--- absent/unreadable — corrupt or partial files are tolerated, parsed
+--- defensively line-by-line (see parseIniText() above). Equivalent of
+--- ImGui::LoadIniSettingsFromDisk().
+function imlove.LoadIniSettings(filename)
+  filename = filename or imlove.io.IniFilename
+  if not filename then return end
+  local fs = love and love.filesystem
+  if not (fs and fs.read) then return end
+  if fs.getInfo and not fs.getInfo(filename) then return end
+  local ok, contents = pcall(fs.read, filename)
+  if not ok or type(contents) ~= "string" then return end
+  ctx.iniEntries = parseIniText(contents)
+  for _, win in pairs(ctx.windows) do
+    applyIniEntryToWindow(win)
+  end
 end
 
 --------------------------------------------------------------------------------
 -- Windows
 --------------------------------------------------------------------------------
+
+-- Window flags, passed to Begin() as a bare string or an array of strings.
+-- Unknown flag names error immediately (typo protection) rather than being
+-- silently ignored.
+local VALID_WINDOW_FLAGS = {
+  NoTitleBar       = true, -- no drag region, no collapse arrow, no close
+                           -- button; content starts at the window's top
+  NoMove           = true, -- title bar no longer drags the window
+  NoResize         = true, -- no corner resize grip
+  NoCollapse       = true, -- no collapse arrow (title bar still drags)
+  AlwaysAutoResize = true, -- always fit content; no scrollbar, grip, or
+                           -- scrolling, ever — the v1.1 behavior
+  NoScrollbar      = true, -- scrolling by wheel still works, bar hidden
+}
+
+-- Shared by Begin()'s window flags and InputText()'s flags below — each
+-- passes its own valid-name set so an unknown flag is always an error
+-- naming the right function.
+local function normalizeFlags(flags, fnName, validSet)
+  local set = {}
+  if flags == nil then return set end
+  if type(flags) == "string" then flags = { flags } end
+  for _, f in ipairs(flags) do
+    if not validSet[f] then
+      error("imlove." .. fnName .. "(): unknown flag '" .. tostring(f) .. "'", 3)
+    end
+    set[f] = true
+  end
+  return set
+end
+
+-- Shared track+grab for a scrolling window or BeginChild region. `state` is
+-- any table with scrollY/contentH/visibleH fields (a window IS one; a
+-- child's persistent scroll table is one too). Only called when content
+-- actually overflows. Direct click-to-position mapping, same idiom as
+-- SliderFloat/SliderInt's track (no drag-anchor, unlike DragFloat).
+local function pushScrollbar(win, id, trackX, trackY, trackW, trackH, state)
+  local sbW = style.scrollbarWidth
+  local x = trackX + trackW - sbW
+  local maxScroll = math.max(state.contentH - state.visibleH, 0)
+  local grabH = clamp(trackH * trackH / state.contentH, 20, trackH)
+  local avail = math.max(trackH - grabH, 0)
+
+  local hovered, held = behavior(win, id, x, trackY, sbW, trackH)
+  if held and avail > 0 then
+    local t = clamp((ctx.mouse.y - trackY) / avail, 0, 1)
+    state.scrollY = t * maxScroll
+  end
+  state.scrollY = clamp(state.scrollY, 0, maxScroll)
+  local grabY = trackY + (avail > 0 and (state.scrollY / maxScroll) * avail or 0)
+
+  pushRect(win, "fill", x, trackY, sbW, trackH, style.colors.frameBg, 0)
+  pushRect(win, "fill", x + 1, grabY, sbW - 2, grabH,
+    held and style.colors.sliderGrabActive
+    or hovered and style.colors.sliderGrabActive
+    or style.colors.sliderGrab, style.rounding)
+end
 
 --- Begin a window. Windows are draggable by their title bar, collapsible via
 --- the arrow in the corner, and remember position/collapsed state across
@@ -404,30 +1214,88 @@ end
 ---     imlove.Text("hello")
 ---   end
 ---   imlove.End()
-function imlove.Begin(title)
+---
+--- open, if not nil, adds a close button to the title bar (mirroring
+--- ImGui's bool* p_open) and is returned back, possibly toggled to false on
+--- the frame the button is clicked — assign it back to your variable like
+--- any other imlove value:
+---
+---   visible, showStats = imlove.Begin("Stats", showStats)
+---   if visible then imlove.Text("hello") end
+---   imlove.End()
+---
+--- Passing open == false skips the window entirely: Begin() returns
+--- `false, false` without drawing anything, and every widget call inside
+--- becomes a cheap no-op — but End() must still be called.
+---
+--- flags is a string or array of strings: "NoTitleBar", "NoMove",
+--- "NoResize", "NoCollapse", "AlwaysAutoResize", "NoScrollbar". An unknown
+--- flag name is an error, not a silent no-op.
+---
+--- A window auto-fits to its content until it is explicitly given a size —
+--- via SetNextWindowSize() or by the user dragging the resize grip — at
+--- which point its size becomes sticky and overflowing content scrolls
+--- instead of growing the window ("AlwaysAutoResize" opts a window out of
+--- this permanently, exactly like ImGui's flag of the same name).
+--- Equivalent of ImGui::Begin(name, p_open, flags).
+function imlove.Begin(title, open, flags)
   if not ctx.inFrame then
     error("imlove.Begin() called before imlove.NewFrame()", 2)
   end
   if ctx.currentWindow then
-    error("imlove.Begin('" .. tostring(title) .. "') called while window '"
-      .. ctx.currentWindow.title .. "' is open — missing imlove.End()", 2)
+    error("imlove.Begin('" .. tostring(title) .. "') called while "
+      .. whatIsOpen(ctx.currentWindow), 2)
   end
   title = tostring(title)
   local displayTitle, idText = splitLabel(title)
 
   local win = ctx.windows[title]
   if not win then
-    win = { title = title, collapsed = false, w = 0, h = 0 }
+    win = { title = title, collapsed = false, w = 0, h = 0,
+      scrollY = 0, sizeMode = "auto" }
     -- Cascade new windows so they don't all spawn on top of each other.
     win.x = 40 + ctx.windowCount * 30
     win.y = 40 + ctx.windowCount * 30
     ctx.windowCount = ctx.windowCount + 1
     ctx.windows[title] = win
     ctx.windowOrder[#ctx.windowOrder + 1] = win
+    -- A loaded ini entry (see LoadIniSettings()) beats the cascade default
+    -- above, and — via win.placed/win.sizePlaced — beats a "once"
+    -- SetNextWindowPos()/SetNextWindowSize() below too (see the "Settings
+    -- persistence" section's precedence note).
+    applyIniEntryToWindow(win)
+    ctx.iniDirty = true -- a brand-new window is worth persisting
   end
   if win.lastFrame == ctx.frame then
     error("imlove.Begin('" .. title .. "') called twice in one frame", 2)
   end
+
+  ctx.currentWindow = win
+  ctx.idStack = { idText }
+  win.flags = normalizeFlags(flags, "Begin", VALID_WINDOW_FLAGS)
+
+  if open == false then
+    -- Not submitted at all: don't touch position/size/draw list/lastFrame,
+    -- so it behaves exactly like a window whose Begin() stopped being
+    -- called (see windowAt()) — it simply stops existing for this frame.
+    -- None of the grip/collapse-arrow/close-button behavior() calls below
+    -- will run this frame (or any frame until it's reopened), so release any
+    -- stale claim on them now — see releaseIfActive()'s comment.
+    releaseIfActive(makeId("#GRIP"))
+    releaseIfActive(makeId("#COLLAPSE"))
+    releaseIfActive(makeId("#CLOSE"))
+    if ctx.resizeWindow == win then ctx.resizeWindow = nil end
+    if ctx.dragWindow == win then ctx.dragWindow = nil end
+    win.skipItems = true
+    win.notSubmitted = true
+    win.indent = 0
+    win.openChild = nil
+    win.prevItem = win.prevItem
+      or { x = 0, y = 0, w = 0, h = 0, hovered = false, active = false,
+        clicked = false }
+    return false, false
+  end
+  win.notSubmitted = false
 
   local pending = ctx.nextWindowPos
   if pending then
@@ -437,57 +1305,197 @@ function imlove.Begin(title)
     ctx.nextWindowPos = nil
   end
   win.placed = true
-  win.lastFrame = ctx.frame
 
-  ctx.currentWindow = win
-  ctx.idStack = { idText }
+  -- A window can never be sized shorter than its title bar plus a couple of
+  -- content lines, or narrower than the style's minimum — otherwise it
+  -- could clip away its own chrome (grip, scrollbar, close button).
+  local minWinH = ctx.font:getHeight() + style.framePadding[2] * 2 -- titleH
+    + frameHeight() * 2 + style.windowPadding * 2
+
+  local pendingSize = ctx.nextWindowSize
+  if pendingSize then
+    if win.flags.AlwaysAutoResize then
+      -- Explicitly ignored: this flag means "always fit content", full stop.
+    elseif pendingSize.cond ~= "once" or not win.sizePlaced then
+      win.w = math.max(pendingSize.w, style.minWindowWidth)
+      win.h = math.max(pendingSize.h, minWinH)
+      win.sizeMode = "fixed"
+      win.sizePlaced = true
+    end
+    ctx.nextWindowSize = nil
+  end
+
+  win.lastFrame = ctx.frame
 
   local fpx, fpy = style.framePadding[1], style.framePadding[2]
   local pad = style.windowPadding
+  -- Locked for this window's whole Begin()/End() span: a
+  -- PushStyleVar("windowPadding", ...) issued after Begin() (still balanced
+  -- by End(), so Render()'s balance check never sees it) must not bake the
+  -- OLD pad into the left/top margin below while the NEW value leaks into
+  -- End()'s auto-fit size and scroll math instead — that mismatch is what
+  -- made a pushed-after-Begin pad size the window lopsided. Every place that
+  -- needs "this window's padding" from here on reads win.pad, never
+  -- style.windowPadding directly again (see End(), availWidth()).
+  win.pad = pad
   win.titleH = ctx.font:getHeight() + fpy * 2
+  local flagSet = win.flags
+  local hasTitleBar = not flagSet.NoTitleBar
+  if not hasTitleBar then win.collapsed = false end
+  win.titleBarH = hasTitleBar and win.titleH or 0
+
+  -- Reset before the close button's behavior() check below can set it back
+  -- to true: "or false" (formerly here) would only ever patch a nil away,
+  -- never a stale `true` left over from the frame the X was actually
+  -- clicked — without this, closing a window once and then reopening it
+  -- (the caller flips `open` back to true, the exact round trip
+  -- ShowDemoWindow() and its own callers use) would report closedThisFrame
+  -- forever after, even though no new click ever happened.
+  win.closedThisFrame = false
+
+  -- Clear last frame's content clip rect before any chrome hit-testing runs
+  -- below (drag zone, resize grip, collapse arrow, close button). Chrome
+  -- lives outside the scissored content region, so it must never be gated by
+  -- withinClip() — leaving last frame's clip in place here (it's only
+  -- recomputed further down, once this frame's own w/h are settled) would
+  -- otherwise make title-bar chrome unclickable on any fixed-size window,
+  -- since the content clip rect always excludes the title bar's y range.
+  win.clipRect = nil
 
   -- If this window is being dragged, follow the mouse (before drawing
   -- anything, so there is no visible lag).
   if ctx.dragWindow == win then
     win.x = ctx.mouse.x - win.dragOffsetX
     win.y = ctx.mouse.y - win.dragOffsetY
+    if ctx.mouse.released then
+      -- The title-bar drag ends this frame: settle here instead of
+      -- waiting for NewFrame()'s idle-frame safety net (see
+      -- releaseIfActive()'s comment), and persist the new position.
+      ctx.dragWindow = nil
+      ctx.iniDirty = true
+    end
+  end
+
+  -- Same idea for an in-progress resize (dragging the corner grip): apply
+  -- it before drawing so the frame the drag starts already reflects it.
+  local resizable = not flagSet.NoResize and not flagSet.AlwaysAutoResize
+  if resizable then
+    local gs = style.gripSize
+    local gx = win.x + win.w - gs
+    local gy = win.y + win.h - gs
+    local gripId = makeId("#GRIP")
+    local _, gripHeld = behavior(win, gripId, gx, gy, gs, gs)
+    if gripHeld then
+      if ctx.resizeWindow ~= win then
+        ctx.resizeWindow = win
+        win.resizeStartX, win.resizeStartY = ctx.mouse.x, ctx.mouse.y
+        win.resizeStartW, win.resizeStartH = win.w, win.h
+      end
+      win.w = math.max(style.minWindowWidth,
+        win.resizeStartW + (ctx.mouse.x - win.resizeStartX))
+      win.h = math.max(minWinH,
+        win.resizeStartH + (ctx.mouse.y - win.resizeStartY))
+      win.sizeMode = "fixed"
+    elseif ctx.resizeWindow == win then
+      ctx.resizeWindow = nil
+      ctx.iniDirty = true -- the resize-grip drag just ended: persist the size
+    end
+  else
+    -- "NoResize"/"AlwaysAutoResize" flipped on mid-drag: give up the grip's
+    -- claim instead of silently going quiet (see releaseIfActive()).
+    releaseIfActive(makeId("#GRIP"))
+    if ctx.resizeWindow == win then ctx.resizeWindow = nil end
   end
 
   -- Start this frame's draw list. Window width/height depend on the content
   -- that hasn't run yet, so the background and title-bar rects are pushed
   -- now and their sizes patched in End().
   win.drawList = {}
+  win.childRectList = {}
   win.bgCmd = pushRect(win, "fill", win.x, win.y, 0, 0,
     style.colors.windowBg, style.rounding)
-  local isFront = ctx.windowOrder[#ctx.windowOrder] == win
-  win.titleCmd = pushRect(win, "fill", win.x, win.y, 0, win.titleH,
-    isFront and style.colors.titleBgActive or style.colors.titleBg,
-    style.rounding)
 
-  -- Collapse arrow: a regular button-behavior region in the title bar.
   local ah = win.titleH
-  local _, _, arrowClicked = behavior(win, makeId("#COLLAPSE"),
-    win.x, win.y, ah, ah)
-  if arrowClicked then win.collapsed = not win.collapsed end
-  local cx, cy, r = win.x + ah * 0.5, win.y + ah * 0.5, ah * 0.24
-  if win.collapsed then -- arrow points right
-    pushTriangle(win, cx - r * 0.6, cy - r, cx - r * 0.6, cy + r,
-      cx + r, cy, style.colors.text)
-  else                  -- arrow points down
-    pushTriangle(win, cx - r, cy - r * 0.6, cx + r, cy - r * 0.6,
-      cx, cy + r, style.colors.text)
-  end
-  pushText(win, displayTitle, win.x + ah + 2, win.y + fpy, style.colors.text)
+  if hasTitleBar then
+    local isFront = ctx.windowOrder[#ctx.windowOrder] == win
+    win.titleCmd = pushRect(win, "fill", win.x, win.y, 0, win.titleH,
+      isFront and style.colors.titleBgActive or style.colors.titleBg,
+      style.rounding)
 
-  -- Start a title-bar drag: mouse pressed on the title bar and nothing else
-  -- claimed the press (the collapse arrow claims it via activeId).
-  if ctx.mouse.pressed and ctx.hoveredWindow == win
-      and ctx.activeId == nil and ctx.dragWindow == nil
-      and pointIn(ctx.mouse.x, ctx.mouse.y,
-        win.x, win.y, math.max(win.w, ah), win.titleH) then
-    ctx.dragWindow = win
-    win.dragOffsetX = ctx.mouse.x - win.x
-    win.dragOffsetY = ctx.mouse.y - win.y
+    -- Collapse arrow: a regular button-behavior region in the title bar.
+    local collapsible = not flagSet.NoCollapse
+    if collapsible then
+      local _, _, arrowClicked = behavior(win, makeId("#COLLAPSE"),
+        win.x, win.y, ah, ah)
+      if arrowClicked then
+        win.collapsed = not win.collapsed
+        ctx.iniDirty = true
+      end
+    else
+      -- "NoCollapse" flipped on mid-hold: release, don't go quiet.
+      releaseIfActive(makeId("#COLLAPSE"))
+      win.collapsed = false
+    end
+    local cx, cy, r = win.x + ah * 0.5, win.y + ah * 0.5, ah * 0.24
+    if win.collapsed then -- arrow points right
+      pushTriangle(win, cx - r * 0.6, cy - r, cx - r * 0.6, cy + r,
+        cx + r, cy, style.colors.text)
+    else                  -- arrow points down
+      pushTriangle(win, cx - r, cy - r * 0.6, cx + r, cy - r * 0.6,
+        cx, cy + r, style.colors.text)
+    end
+    pushText(win, displayTitle, win.x + ah + 2, win.y + fpy, style.colors.text)
+
+    -- Close button: a small X at the title bar's right edge, only when the
+    -- caller passed an `open` value (nil means "no close button", as today).
+    if open ~= nil then
+      local bx, by = win.x + win.w - ah, win.y
+      local closeId = makeId("#CLOSE")
+      local closeHovered, closeHeld, closePressed =
+        behavior(win, closeId, bx, by, ah, ah)
+      if closePressed then win.closedThisFrame = true end
+      if closeHeld or closeHovered then
+        pushRect(win, "fill", bx, by, ah, ah,
+          closeHeld and style.colors.buttonActive
+          or style.colors.buttonHovered, style.rounding)
+      end
+      local ip = ah * 0.28
+      pushLine(win, bx + ip, by + ip, bx + ah - ip, by + ah - ip,
+        style.colors.text)
+      pushLine(win, bx + ah - ip, by + ip, bx + ip, by + ah - ip,
+        style.colors.text)
+    else
+      -- The `open` argument stopped being passed (back to nil, "no close
+      -- button"): release, don't go quiet.
+      releaseIfActive(makeId("#CLOSE"))
+    end
+
+    -- Start a title-bar drag: mouse pressed on the title bar and nothing
+    -- else claimed the press (the collapse arrow/close button claim it via
+    -- activeId).
+    if not flagSet.NoMove and ctx.mouse.pressed and ctx.hoveredWindow == win
+        and ctx.activeId == nil and ctx.dragWindow == nil
+        and pointIn(ctx.mouse.x, ctx.mouse.y,
+          win.x, win.y, math.max(win.w, ah), win.titleH) then
+      ctx.dragWindow = win
+      win.dragOffsetX = ctx.mouse.x - win.x
+      win.dragOffsetY = ctx.mouse.y - win.y
+    end
+  else
+    win.titleCmd = nil
+    -- "NoTitleBar" flipped on: takes the collapse arrow and close button
+    -- with it, so release any stale claim on them too.
+    releaseIfActive(makeId("#COLLAPSE"))
+    releaseIfActive(makeId("#CLOSE"))
+  end
+
+  -- The resize grip itself: drawn last so it sits in front of the border
+  -- End() will add, in the bottom-right corner.
+  if resizable then
+    local gs = style.gripSize
+    pushTriangle(win, win.x + win.w, win.y + win.h - gs,
+      win.x + win.w - gs, win.y + win.h,
+      win.x + win.w, win.y + win.h, style.colors.border)
   end
 
   -- Reset the layout cursor. skipItems makes every widget a cheap no-op
@@ -495,14 +1503,36 @@ function imlove.Begin(title)
   win.skipItems = win.collapsed
   win.indent = 0
   win.innerX = win.x + pad
-  win.nextY = win.y + win.titleH + pad
+  win.nextY = win.y + win.titleBarH + pad - (win.scrollY or 0)
   win.lineY, win.lineH = win.nextY, 0
   win.sameLineX = nil
-  win.prevItem = { x = win.innerX, y = win.nextY, w = 0, h = 0 }
-  win.contentMaxX = win.x + ah + 2 + ctx.font:getWidth(displayTitle) + fpx
-  win.contentMaxY = win.y + win.titleH
+  win.prevItem = { x = win.innerX, y = win.nextY, w = 0, h = 0,
+    hovered = false, active = false, clicked = false }
+  win.contentMaxX = hasTitleBar
+    and (win.x + ah + 2 + ctx.font:getWidth(displayTitle) + fpx)
+    or win.x
+  win.contentMaxY = win.y + win.titleBarH
 
-  return not win.collapsed
+  -- Fixed-size windows clip their content region so it can't paint over the
+  -- title bar or below the window's own bounds — this is also what makes
+  -- scrolled-out widgets stop being clickable (see withinClip()). Auto-fit
+  -- windows never need this: they always grow to fit, so there's nothing to
+  -- clip against.
+  win.clipRect = nil
+  if not win.collapsed and win.sizeMode == "fixed" and not flagSet.AlwaysAutoResize then
+    local cy = win.y + win.titleBarH
+    local ch = math.max(win.h - win.titleBarH, 0)
+    pushClip(win, win.x, cy, win.w, ch)
+    win.clipRect = { x = win.x, y = cy, w = win.w, h = ch }
+  end
+
+  if win.closedThisFrame then
+    return not win.collapsed, false
+  end
+  if open == nil then
+    return not win.collapsed, nil
+  end
+  return not win.collapsed, true
 end
 
 --- Close the current window. Must be called exactly once for every Begin(),
@@ -513,19 +1543,74 @@ function imlove.End()
   if not win then
     error("imlove.End() called without a matching imlove.Begin()", 2)
   end
+  if win.isChild then
+    error("imlove.End() called with BeginChild('" .. win.idStr
+      .. "') still open — missing imlove.EndChild()", 2)
+  end
+  if win.isPopup then
+    error("imlove.End() called with a popup still open — missing imlove.EndPopup()", 2)
+  end
+  if win.isTooltip then
+    error("imlove.End() called with a tooltip still open — missing imlove.EndTooltip()", 2)
+  end
   if #ctx.idStack > 1 then
     error("imlove.End(): " .. (#ctx.idStack - 1)
       .. " PushID()/TreeNode() left unpopped in window '" .. win.title .. "'", 2)
   end
 
-  local pad = style.windowPadding
-  win.w = math.max(win.contentMaxX + pad - win.x, style.minWindowWidth)
-  win.h = win.collapsed and win.titleH
-    or math.max(win.contentMaxY + pad - win.y, win.titleH)
+  if win.notSubmitted then
+    ctx.currentWindow = nil
+    ctx.idStack = {}
+    return
+  end
+
+  local pad = win.pad -- the value Begin() locked in, NOT style.windowPadding
+                      -- (which a PushStyleVar() between Begin() and here may
+                      -- have since changed) -- see Begin()'s comment.
+  local flagSet = win.flags or {}
+  local autoFit = flagSet.AlwaysAutoResize or win.sizeMode ~= "fixed"
+
+  if autoFit then
+    win.w = math.max(win.contentMaxX + pad - win.x, style.minWindowWidth)
+    win.h = win.collapsed and win.titleBarH
+      or math.max(win.contentMaxY + pad - win.y, win.titleBarH)
+    win.scrollY, win.contentH, win.visibleH = 0, 0, 0
+  else
+    if not win.collapsed then
+      popClip(win) -- close the content clip region pushed in Begin()
+    end
+    win.visibleH = math.max(win.h - win.titleBarH, 0)
+    -- contentMaxY was measured against a cursor that already started at
+    -- -scrollY (so content draws in the right place while scrolled), so add
+    -- it back here to get the scroll-independent total content height —
+    -- otherwise contentH would shrink as scrollY grows, clamping scrollY
+    -- back down and fighting the very scroll that just happened.
+    win.contentH = math.max(
+      win.contentMaxY + pad - (win.y + win.titleBarH) + win.scrollY, 0)
+    local maxScroll = math.max(win.contentH - win.visibleH, 0)
+    win.scrollY = clamp(win.scrollY, 0, maxScroll)
+  end
 
   -- Patch the rects whose width/height weren't known in Begin().
   win.bgCmd.w, win.bgCmd.h = win.w, win.h
-  win.titleCmd.w = win.w
+  if win.titleCmd then win.titleCmd.w = win.w end
+  win.lastChildRects = win.childRectList
+
+  win.hasScrollbar = not win.collapsed and not autoFit
+    and not flagSet.NoScrollbar and win.contentH > win.visibleH
+  if win.hasScrollbar then
+    -- The resize grip sits in the bottom-right corner, gripSize square, and
+    -- (being anchored to the same corner) always overlaps the bottom of a
+    -- full-height scrollbar track. Its behavior() runs earlier, in Begin(),
+    -- so it always wins that overlap — shorten the track instead of leaving
+    -- the scrollbar's bottom permanently dead under a resizable window.
+    local trackH = win.visibleH
+    local resizable = not flagSet.NoResize and not flagSet.AlwaysAutoResize
+    if resizable then trackH = math.max(trackH - style.gripSize, 0) end
+    pushScrollbar(win, makeId("#SCROLLBAR"),
+      win.x, win.y + win.titleBarH, win.w, trackH, win)
+  end
+
   pushRect(win, "line", win.x, win.y, win.w, win.h,
     style.colors.border, style.rounding)
 
@@ -542,6 +1627,16 @@ function imlove.SetNextWindowPos(x, y, cond)
   ctx.nextWindowPos = { x = x, y = y, cond = cond or "always" }
 end
 
+--- Set the size the next Begin() will use, taking the window out of
+--- auto-fit mode (see Begin()'s sizing model) — from then on it keeps this
+--- size and overflowing content scrolls instead of growing the window.
+--- cond is "always" (default) or "once" (only the first time the window is
+--- ever created). Ignored by a window with the "AlwaysAutoResize" flag.
+--- Equivalent of ImGui::SetNextWindowSize().
+function imlove.SetNextWindowSize(w, h, cond)
+  ctx.nextWindowSize = { w = w, h = h, cond = cond or "always" }
+end
+
 --- Position of the current window. Equivalent of ImGui::GetWindowPos().
 function imlove.GetWindowPos()
   local win = requireWindow("GetWindowPos")
@@ -553,6 +1648,481 @@ end
 function imlove.GetWindowSize()
   local win = requireWindow("GetWindowSize")
   return win.w, win.h
+end
+
+--- Begin a scrollable child region embedded at the cursor in the current
+--- window (or child) — a fixed-size box that participates in its root
+--- window's draw list (no separate z-order) and gets its own cursor, ID
+--- scope, and scroll position, keyed by idStr and persistent across frames
+--- like everything else. w/h <= 0 mean, respectively, "remaining width" and
+--- a 200px default (there is no well-defined "remaining height" the way
+--- there is width, since content can always continue below the fold).
+--- border, if truthy, draws a border line around it. Must be matched by
+--- EndChild(). Returns whether it's visible — with imlove's clipping model
+--- that's simply "false while an ancestor window/child is collapsed or
+--- skipping, true otherwise". Equivalent of ImGui::BeginChild().
+function imlove.BeginChild(idStr, w, h, border)
+  local parent = requireWindow("BeginChild")
+  idStr = tostring(idStr)
+  local resolvedW = (w and w > 0) and w or availWidth(parent)
+  local resolvedH = (h and h > 0) and h or 200
+
+  local root = parent.root or parent
+  local idStackBase = #ctx.idStack
+  ctx.idStack[idStackBase + 1] = idStr
+  -- Keyed by the FULL id-stack path, not the bare idStr: two BeginChild()
+  -- calls with the same idStr nested at different depths (e.g. "Row" at the
+  -- window's top level and "Row" again inside a "Wrapper" child) must not
+  -- share scroll state just because their last path segment matches.
+  local scrollKey = table.concat(ctx.idStack, "\31")
+
+  local cx, cy
+  if parent.skipItems then
+    cx, cy = parent.innerX or parent.x, parent.nextY or parent.y
+  else
+    cx, cy = itemAdd(parent, resolvedW, resolvedH)
+  end
+
+  root.childScroll = root.childScroll or {}
+  local scrollState = root.childScroll[scrollKey]
+  if not scrollState then
+    scrollState = { scrollY = 0, contentH = 0, visibleH = resolvedH }
+    root.childScroll[scrollKey] = scrollState
+  end
+
+  -- Locked for this child's whole BeginChild()/EndChild() span, same
+  -- reasoning as win.pad in Begin() -- EndChild() must read child.pad back,
+  -- never style.windowPadding directly, or a PushStyleVar("windowPadding")
+  -- issued inside the child bakes an inconsistent pad into its scroll math.
+  local pad = style.windowPadding
+  local child = {
+    isChild = true, title = idStr, idStr = idStr, scrollKey = scrollKey,
+    root = root, parent = parent,
+    idStackBase = idStackBase, border = border and true or false,
+    x = cx, y = cy, w = resolvedW, h = resolvedH, pad = pad,
+    indent = 0, innerX = cx + pad,
+    nextY = cy + pad - scrollState.scrollY,
+    sameLineX = nil,
+    prevItem = { x = cx + pad, y = cy + pad, w = 0, h = 0,
+      hovered = false, active = false, clicked = false },
+    contentMaxX = cx + pad, contentMaxY = cy + pad,
+    skipItems = parent.skipItems,
+    clipRect = { x = cx, y = cy, w = resolvedW, h = resolvedH },
+    drawList = parent.drawList,
+    scrollState = scrollState,
+    -- Last frame's "did this child show a scrollbar" (see availWidth()).
+    -- A fresh `child` table is built every call, so this must be read back
+    -- from the persistent scrollState, not the (nonexistent) previous child.
+    hasScrollbar = scrollState.hasScrollbar,
+  }
+  child.lineY, child.lineH = child.nextY, 0
+
+  if not parent.skipItems then
+    pushClip(child, cx, cy, resolvedW, resolvedH)
+  end
+
+  parent.openChild = child
+  ctx.currentWindow = child
+  return not parent.skipItems
+end
+
+--- Close the current BeginChild() region. Must be called exactly once per
+--- BeginChild(); Begin()/End() (and an outer BeginChild()/EndChild()) will
+--- error if you forget. Equivalent of ImGui::EndChild().
+function imlove.EndChild()
+  local win = ctx.currentWindow
+  if not win or not win.isChild then
+    error("imlove.EndChild() called without a matching imlove.BeginChild()", 2)
+  end
+  if win.openChild then
+    error("imlove.EndChild(): BeginChild('" .. win.openChild.idStr
+      .. "') still open — missing imlove.EndChild()", 2)
+  end
+  if #ctx.idStack ~= win.idStackBase + 1 then
+    error("imlove.EndChild(): " .. (#ctx.idStack - win.idStackBase - 1)
+      .. " PushID()/TreeNode() left unpopped in child '" .. win.idStr .. "'", 2)
+  end
+  ctx.idStack[#ctx.idStack] = nil
+
+  local parent = win.parent
+  parent.openChild = nil
+
+  if not win.skipItems then
+    popClip(win)
+
+    local pad = win.pad -- the value BeginChild() locked in -- see there.
+    local st = win.scrollState
+    -- Same scrollY-added-back correction as End() — see the comment there.
+    -- The subtracted origin must be the UNPADDED win.y, exactly like End()
+    -- subtracts the unpadded (win.y + win.titleBarH) — not (win.y + pad):
+    -- BeginChild's initial contentMaxY (cy + pad) already accounts for the
+    -- top padding the same way a window's first widget does, so subtracting
+    -- an extra pad here double-counted it and made children under-scroll by
+    -- one windowPadding (the last line rested 2*pad from the bottom instead
+    -- of pad).
+    st.contentH = math.max(
+      win.contentMaxY + pad - win.y + st.scrollY, 0)
+    -- Also match End()'s visibleH convention: a window's visibleH is
+    -- win.h - titleBarH — the full remaining span down to the window's
+    -- bottom edge, with NO bottom pad subtracted (the resting gap at max
+    -- scroll comes entirely from contentH's "+pad" term, not from here). A
+    -- child has no title bar (its equivalent is 0), so its visibleH must be
+    -- the full win.h. Subtracting pad*2 here (as before) double-reserved the
+    -- bottom pad on top of contentH's own "+pad", shrinking maxScroll and
+    -- leaving content resting 3*pad from the edge instead of 1*pad.
+    st.visibleH = math.max(win.h, 0)
+    local maxScroll = math.max(st.contentH - st.visibleH, 0)
+    st.scrollY = clamp(st.scrollY, 0, maxScroll)
+
+    st.hasScrollbar = st.contentH > st.visibleH
+    if st.hasScrollbar then
+      pushScrollbar(win, makeId("#SCROLLBAR"), win.x, win.y, win.w, win.h, st)
+    end
+    if win.border then
+      pushRect(win, "line", win.x, win.y, win.w, win.h, style.colors.border, 0)
+    end
+
+    local root = win.root
+    root.childRectList = root.childRectList or {}
+    root.childRectList[#root.childRectList + 1] =
+      { id = win.scrollKey, x = win.x, y = win.y, w = win.w, h = win.h }
+  end
+
+  ctx.currentWindow = parent
+end
+
+--------------------------------------------------------------------------------
+-- Popups & tooltips: a small overlay layer drawn ABOVE every window (see
+-- Render()'s overlay pass) and hit-tested BEFORE them (see NewFrame(); the
+-- bookkeeping — popupId(), popupIsOpen(), openPopupById(), closePopup(),
+-- popupAt() — lives further up, before Frame lifecycle, since NewFrame()
+-- needs it). Popups reuse the exact same window-shaped table and
+-- cursor/clip machinery as Begin() — every existing widget function works
+-- unmodified inside one — but keep their own draw list, aren't part of
+-- ctx.windowOrder, and are closed with EndPopup() instead of End(). A
+-- tooltip is the simplest overlay of all: it never accepts input, always
+-- follows the mouse, and always draws last of all (above even popups).
+--------------------------------------------------------------------------------
+
+-- Shared layout for BeginPopup()/BeginPopupModal()/BeginPopupContextItem()
+-- (and Combo()'s internal dropdown): sets up a window-shaped table exactly
+-- like Begin() does — cursor, padding, its own draw list — so every widget
+-- function works inside unmodified, but with no drag/resize/collapse, drawn
+-- into the overlay band instead of a regular window's slot, and reparented
+-- through ctx.currentWindow so nesting (a popup opened from inside another
+-- popup, or from inside a regular window/child) unwinds correctly in
+-- EndPopup(). `strId` becomes the content scope's ID-stack entry, the same
+-- convention as BeginChild()'s idStr.
+local function beginPopupContent(id, strId, kind, title)
+  local p = ctx.popups[id]
+  local win = p.win
+  if not win then
+    win = { w = 0, h = 0 }
+    p.win = win
+  end
+  win.isPopup = true
+  win.popupId = id
+  win.kind = kind
+  win.parent = ctx.currentWindow
+  win.flags = {}
+
+  ctx.currentWindow = win
+  win.idStackBase = #ctx.idStack
+  ctx.idStack[win.idStackBase + 1] = tostring(strId)
+  win.lastFrame = ctx.frame
+  -- Snapshot of the id-stack path leading INTO this popup's own content —
+  -- every widget id built while it's open has this as a prefix (including
+  -- ids in a nested popup opened from inside it). NewFrame() uses this, for
+  -- a modal, to tell "belongs to the modal" apart from "belongs to
+  -- something the modal blocks" without knowing any widget ids itself —
+  -- see the modal input-lockout there.
+  p.idPrefix = table.concat(ctx.idStack, "\31")
+
+  local hasTitleBar = kind == "modal"
+  win.titleH = hasTitleBar
+    and (ctx.font:getHeight() + style.framePadding[2] * 2) or 0
+  win.titleBarH = win.titleH
+
+  local sw, sh = love.graphics.getDimensions()
+  if kind == "modal" then
+    -- Always centered — recomputed every frame from last frame's size (the
+    -- library's usual one-frame lag), so it settles into place within a
+    -- frame or two of first appearing and stays centered as content grows.
+    win.x = (sw - (win.w or 0)) / 2
+    win.y = (sh - (win.h or 0)) / 2
+  elseif p.justOpened then
+    -- Positioned once, at the anchor openPopupById() captured, clamped to
+    -- stay fully on screen (using last known size — same one-frame lag);
+    -- unlike a modal or the tooltip, it then stays put while open.
+    win.x = clamp(p.anchorX, 0, math.max(sw - (win.w or 0), 0))
+    win.y = clamp(p.anchorY, 0, math.max(sh - (win.h or 0), 0))
+  end
+  p.justOpened = false
+
+  win.drawList = {}
+  win.childRectList = {}
+  if kind == "modal" then
+    -- Dims and blocks the rest of the screen — see NewFrame()'s hit-testing
+    -- and popupAt(): a regular window is never hovered while any modal is
+    -- open. Pushed first so it sits behind this popup's own background.
+    pushRect(win, "fill", 0, 0, sw, sh, { 0, 0, 0, 0.55 }, 0)
+  end
+  win.bgCmd = pushRect(win, "fill", win.x, win.y, 0, 0,
+    style.colors.windowBg, style.rounding)
+  if hasTitleBar then
+    win.titleCmd = pushRect(win, "fill", win.x, win.y, 0, win.titleH,
+      style.colors.titleBgActive, style.rounding)
+    pushText(win, title or strId, win.x + style.framePadding[1],
+      win.y + style.framePadding[2], style.colors.text)
+  else
+    win.titleCmd = nil
+  end
+
+  -- Locked for this popup's whole beginPopupContent()/endPopupContent()
+  -- span, same reasoning as win.pad in Begin() -- endPopupContent() must
+  -- read win.pad back, never style.windowPadding directly.
+  win.pad = style.windowPadding
+  win.skipItems = false
+  win.indent = 0
+  win.innerX = win.x + win.pad
+  win.nextY = win.y + win.titleBarH + win.pad
+  win.lineY, win.lineH = win.nextY, 0
+  win.sameLineX = nil
+  win.prevItem = { x = win.innerX, y = win.nextY, w = 0, h = 0,
+    hovered = false, active = false, clicked = false }
+  win.contentMaxX = win.x
+  win.contentMaxY = win.y + win.titleBarH
+  win.clipRect = nil
+  win.hasScrollbar = false
+end
+
+-- Closes what beginPopupContent() opened: fits the popup to its content
+-- (position was already decided in beginPopupContent() — same one-frame-lag
+-- convention a resizing window uses — so it's never touched here) and
+-- restores ctx.currentWindow.
+local function endPopupContent(win)
+  local pad = win.pad -- the value beginPopupContent() locked in -- see there.
+  win.w = math.max(win.contentMaxX + pad - win.x, style.minWindowWidth)
+  win.h = math.max(win.contentMaxY + pad - win.y, win.titleBarH)
+  win.bgCmd.w, win.bgCmd.h = win.w, win.h
+  if win.titleCmd then win.titleCmd.w = win.w end
+  pushRect(win, "line", win.x, win.y, win.w, win.h, style.colors.border,
+    style.rounding)
+
+  ctx.idStack[#ctx.idStack] = nil
+  ctx.currentWindow = win.parent
+end
+
+--- Set a tooltip for this frame: a small auto-fit box with no title bar,
+--- positioned just past the mouse cursor (clamped to stay on screen),
+--- drawn above absolutely everything (even open popups), and never
+--- hit-testable — hovering or clicking where it's drawn always reaches
+--- whatever is really there. Typically called right after IsItemHovered():
+---
+---   imlove.Button("Save")
+---   if imlove.IsItemHovered() then imlove.SetTooltip("writes to disk") end
+---
+--- Calling it more than once in a frame replaces the previous call — only
+--- the LAST one shows, exactly like calling BeginTooltip()/EndTooltip()
+--- yourself twice would. Equivalent of ImGui::SetTooltip().
+function imlove.SetTooltip(fmt, ...)
+  imlove.BeginTooltip()
+  imlove.Text(fmt, ...)
+  imlove.EndTooltip()
+end
+
+--- Manual form of SetTooltip(), for a tooltip with more than one widget in
+--- it. Must be paired with EndTooltip(); unlike Begin()/End(), calling this
+--- more than once in a frame is fine — each call simply replaces whatever
+--- the previous one built, "last call wins" exactly like SetTooltip().
+--- Equivalent of ImGui::BeginTooltip().
+function imlove.BeginTooltip()
+  -- Calling this again before EndTooltip() would otherwise set
+  -- win.parent = win (ctx.currentWindow IS already the tooltip), a
+  -- self-reference that EndTooltip() could never undo — every Render()
+  -- from then on, forever, would fail with "a tooltip is open" (see
+  -- whatIsOpen()), even after the caller fixes the bug, since nothing
+  -- would ever restore ctx.currentWindow to anything else. Erroring here,
+  -- before that assignment happens, keeps this the same kind of
+  -- one-frame, fix-it-and-it's-fine mistake as every other unbalanced
+  -- Begin*/End* pair in the library instead.
+  if ctx.currentWindow and ctx.currentWindow.isTooltip then
+    error("imlove.BeginTooltip() called while a tooltip is already open — "
+      .. "missing imlove.EndTooltip()", 2)
+  end
+  local win = ctx.tooltipWin
+  if not win then
+    win = { title = "##tooltip" }
+    ctx.tooltipWin = win
+  end
+  win.isTooltip = true
+  win.parent = ctx.currentWindow
+  win.flags = {}
+  ctx.currentWindow = win
+  win.idStackBase = #ctx.idStack
+  ctx.idStack[win.idStackBase + 1] = "##tooltip"
+  win.lastFrame = ctx.frame
+
+  local sw, sh = love.graphics.getDimensions()
+  win.x = clamp(ctx.mouse.x + 16, 0, math.max(sw - (win.w or 0), 0))
+  win.y = clamp(ctx.mouse.y + 16, 0, math.max(sh - (win.h or 0), 0))
+
+  win.drawList = {}
+  win.bgCmd = pushRect(win, "fill", win.x, win.y, 0, 0,
+    style.colors.windowBg, style.rounding)
+  win.titleCmd = nil
+  win.skipItems = false
+  win.indent = 0
+  -- Locked for this tooltip's whole BeginTooltip()/EndTooltip() span, same
+  -- reasoning as win.pad in Begin() -- EndTooltip() must read win.pad back,
+  -- never style.windowPadding directly.
+  win.pad = style.windowPadding
+  win.innerX = win.x + win.pad
+  win.nextY = win.y + win.pad
+  win.lineY, win.lineH = win.nextY, 0
+  win.sameLineX = nil
+  win.prevItem = { x = win.innerX, y = win.nextY, w = 0, h = 0,
+    hovered = false, active = false, clicked = false }
+  win.contentMaxX, win.contentMaxY = win.x, win.y
+  win.clipRect = nil
+  win.hasScrollbar = false
+end
+
+--- Closes what BeginTooltip() opened. Equivalent of ImGui::EndTooltip().
+function imlove.EndTooltip()
+  local win = ctx.currentWindow
+  if not win or not win.isTooltip then
+    error("imlove.EndTooltip() called without a matching imlove.BeginTooltip()", 2)
+  end
+  local pad = win.pad -- the value BeginTooltip() locked in -- see there.
+  win.w = math.max(win.contentMaxX + pad - win.x, style.minWindowWidth)
+  win.h = math.max(win.contentMaxY + pad - win.y, 1)
+  win.bgCmd.w, win.bgCmd.h = win.w, win.h
+  pushRect(win, "line", win.x, win.y, win.w, win.h, style.colors.border,
+    style.rounding)
+
+  ctx.idStack[#ctx.idStack] = nil
+  ctx.currentWindow = win.parent
+end
+
+--- Marks strId's popup open — resolved against the current ID stack exactly
+--- like a widget id (see BeginPopup()'s doc comment), so it's typically
+--- called right after the button/item that should open it:
+---
+---   if imlove.Button("Options") then imlove.OpenPopup("options") end
+---
+--- Equivalent of ImGui::OpenPopup().
+function imlove.OpenPopup(strId)
+  openPopupById(popupId(strId), "popup")
+end
+
+--- Begin a popup opened with OpenPopup(strId): a small floating, auto-fit,
+--- no-title-bar window, positioned where the mouse was when OpenPopup() was
+--- called (clamped to stay on screen), drawn above every regular window.
+--- Returns whether it's open; UNLIKE Begin()/End() (where you always call
+--- End()), EndPopup() must be called ONLY when this returns true — exactly
+--- Dear ImGui's convention:
+---
+---   if imlove.BeginPopup("options") then
+---     imlove.Text("...")
+---     imlove.EndPopup()
+---   end
+---
+--- strId is resolved against the current ID stack the same way OpenPopup()
+--- resolves it, so call both from the same scope (window, PushID, or
+--- enclosing popup) unless you want them to refer to different popups. A
+--- press outside the topmost open popup closes it — and everything stacked
+--- above whatever it landed on, if it landed on a lower popup in a nested
+--- stack — and that dismissing press is CONSUMED (your game never sees
+--- it), exactly like a press that lands ON a popup or widget is. Equivalent
+--- of ImGui::BeginPopup().
+function imlove.BeginPopup(strId)
+  local id = popupId(strId)
+  if not popupIsOpen(id) then return false end
+  beginPopupContent(id, strId, "popup", nil)
+  return true
+end
+
+--- Closes a popup opened with a successful BeginPopup()/BeginPopupModal()/
+--- BeginPopupContextItem() — call it ONLY when that call returned true (see
+--- BeginPopup()'s doc comment). Calling it without a matching open popup is
+--- an error, and so is leaving one open past End()/EndChild()/Render().
+--- Equivalent of ImGui::EndPopup().
+function imlove.EndPopup()
+  local win = ctx.currentWindow
+  if not win or not win.isPopup then
+    error("imlove.EndPopup() called without a matching successful "
+      .. "imlove.BeginPopup()/BeginPopupModal()/BeginPopupContextItem()", 2)
+  end
+  if #ctx.idStack ~= win.idStackBase + 1 then
+    error("imlove.EndPopup(): " .. (#ctx.idStack - win.idStackBase - 1)
+      .. " PushID()/TreeNode() left unpopped in popup", 2)
+  end
+  endPopupContent(win)
+end
+
+--- Closes whichever popup's content is currently being built — call it from
+--- inside a BeginPopup()/BeginPopupModal()/BeginPopupContextItem() block
+--- (e.g. from a "Close"/"OK" Button(), or right after a Selectable() picks
+--- an option) instead of tracking the popup's id yourself. A no-op outside
+--- a popup. Equivalent of ImGui::CloseCurrentPopup().
+function imlove.CloseCurrentPopup()
+  local win = ctx.currentWindow
+  if win and win.isPopup then
+    closePopup(win.popupId)
+  end
+end
+
+--- Opens a popup on a right-click over the most recently submitted item
+--- (its rectangle — the same one IsItemHovered() reads) — the canonical
+--- right-click context menu:
+---
+---   imlove.PushID(e.id)
+---   imlove.Selectable(e.name, false)
+---   if imlove.BeginPopupContextItem() then
+---     if imlove.Selectable("Delete") then removeEntity(e) end
+---     imlove.EndPopup()
+---   end
+---   imlove.PopID()
+---
+--- strId defaults to a fixed name scoped to the surrounding ID stack —
+--- exactly like every other widget, wrap each row in PushID()/PopID() (as
+--- you already would to give each row's own widgets distinct ids) to keep
+--- separate rows' context menus separate; pass an explicit strId if you'd
+--- rather not rely on that. Otherwise behaves exactly like BeginPopup():
+--- auto-fit, no title bar, positioned at the click, dismissed by an outside
+--- press (consumed) — pair with EndPopup() only when this returns true.
+--- Equivalent of ImGui::BeginPopupContextItem().
+function imlove.BeginPopupContextItem(strId)
+  local win = requireWindow("BeginPopupContextItem")
+  strId = strId or "##popupcontext"
+  local id = popupId(strId)
+
+  if not win.skipItems and ctx.mouse.rightPressed and win.prevItem.hovered then
+    openPopupById(id, "popup")
+  end
+
+  if not popupIsOpen(id) then return false end
+  beginPopupContent(id, strId, "popup", nil)
+  return true
+end
+
+--- Begin a modal popup opened with OpenPopup(title) (or the id portion of
+--- "Label##id"): has a title bar showing title, is always centered on
+--- screen, dims and blocks input to everything else — regular windows stop
+--- being hit-testable and io.WantCaptureMouse is unconditionally true while
+--- it's open — and, unlike BeginPopup(), an outside press does NOT dismiss
+--- it: only CloseCurrentPopup() does (wire it to your own OK/Cancel
+--- buttons). Pair with EndPopup() only when this returns true, exactly like
+--- BeginPopup(). Equivalent of ImGui::BeginPopupModal().
+function imlove.BeginPopupModal(title)
+  title = tostring(title)
+  local _, idText = splitLabel(title)
+  local id = popupId(idText)
+  if not popupIsOpen(id) then return false end
+  ctx.popups[id].kind = "modal"
+  beginPopupContent(id, idText, "modal", title)
+  return true
 end
 
 --------------------------------------------------------------------------------
@@ -567,27 +2137,110 @@ function imlove.Text(fmt, ...)
   local text = tostring(fmt)
   if select("#", ...) > 0 then text = string.format(text, ...) end
   local w, h = textSize(text)
-  local x, y = itemAdd(win, w, h)
+  local x, y = itemAddPassive(win, w, h)
   pushText(win, text, x, y, style.colors.text)
 end
 
+--- Static text drawn in an explicit color instead of the theme's default,
+--- e.g. imlove.TextColored({1, 0.4, 0.4, 1}, "low health!"). Extra arguments
+--- go through string.format like Text(). Equivalent of ImGui::TextColored().
+function imlove.TextColored(color, fmt, ...)
+  local win = requireWindow("TextColored")
+  if win.skipItems then return end
+  local text = tostring(fmt)
+  if select("#", ...) > 0 then text = string.format(text, ...) end
+  local w, h = textSize(text)
+  local x, y = itemAddPassive(win, w, h)
+  pushText(win, text, x, y, color)
+end
+
+--- Static text dimmed to a muted gray, for de-emphasized captions or
+--- placeholders. Equivalent of ImGui::TextDisabled().
+function imlove.TextDisabled(fmt, ...)
+  local win = requireWindow("TextDisabled")
+  if win.skipItems then return end
+  local text = tostring(fmt)
+  if select("#", ...) > 0 then text = string.format(text, ...) end
+  local w, h = textSize(text)
+  local x, y = itemAddPassive(win, w, h)
+  pushText(win, text, x, y, style.colors.textDisabled)
+end
+
+--- Static text that word-wraps to the window's available content width
+--- (as of last frame — the usual one-frame lag; see availWidth()).
+--- Equivalent of ImGui::TextWrapped().
+function imlove.TextWrapped(fmt, ...)
+  local win = requireWindow("TextWrapped")
+  if win.skipItems then return end
+  local text = tostring(fmt)
+  if select("#", ...) > 0 then text = string.format(text, ...) end
+  local wrapW = math.max(availWidth(win), 1)
+  local _, wrapped = ctx.font:getWrap(text, wrapW)
+  text = table.concat(wrapped, "\n")
+  local w, h = textSize(text)
+  local x, y = itemAddPassive(win, w, h)
+  pushText(win, text, x, y, style.colors.text)
+end
+
+--- Static text prefixed with a small filled bullet, for flat lists of facts
+--- that don't need a full TreeNode. Equivalent of ImGui::BulletText().
+function imlove.BulletText(fmt, ...)
+  local win = requireWindow("BulletText")
+  if win.skipItems then return end
+  local text = tostring(fmt)
+  if select("#", ...) > 0 then text = string.format(text, ...) end
+  local fontH = ctx.font:getHeight()
+  local bulletW = fontH * 0.6
+  local tw, th = textSize(text)
+  local w = bulletW + style.innerSpacing + tw
+  local x, y = itemAddPassive(win, w, th)
+  pushCircle(win, "fill", x + bulletW * 0.5, y + th * 0.5, fontH * 0.15,
+    style.colors.text)
+  pushText(win, text, x + bulletW + style.innerSpacing, y, style.colors.text)
+end
+
 --- A push button. Returns true on the frame it is clicked (mouse released
---- over it). Equivalent of ImGui::Button().
-function imlove.Button(label)
+--- over it). w/h are optional explicit sizes; 0 or nil on either axis means
+--- "auto-size to the label" on that axis, same as ImGui's ImVec2(0, 0).
+--- Equivalent of ImGui::Button().
+function imlove.Button(label, w, h)
   local win = requireWindow("Button")
   if win.skipItems then return false end
   local display, idText = splitLabel(label)
   local id = makeId(idText)
   local fpx, fpy = style.framePadding[1], style.framePadding[2]
   local tw, th = textSize(display)
-  local w, h = tw + fpx * 2, th + fpy * 2
+  w = (w and w > 0) and w or tw + fpx * 2
+  h = (h and h > 0) and h or th + fpy * 2
   local x, y = itemAdd(win, w, h)
   local hovered, held, pressed = behavior(win, id, x, y, w, h)
+  recordItem(win, hovered, held, pressed)
   local color = held and style.colors.buttonActive
     or hovered and style.colors.buttonHovered
     or style.colors.button
   pushRect(win, "fill", x, y, w, h, color, style.rounding)
-  pushText(win, display, x + fpx, y + fpy, style.colors.text)
+  pushText(win, display, x + (w - tw) / 2, y + (h - th) / 2, style.colors.text)
+  return pressed
+end
+
+--- A push button with no vertical frame padding, for placing a button
+--- inline with a line of text. Equivalent of ImGui::SmallButton().
+function imlove.SmallButton(label)
+  local win = requireWindow("SmallButton")
+  if win.skipItems then return false end
+  local display, idText = splitLabel(label)
+  local id = makeId(idText)
+  local fpx = style.framePadding[1]
+  local tw, th = textSize(display)
+  local w, h = tw + fpx * 2, th
+  local x, y = itemAdd(win, w, h)
+  local hovered, held, pressed = behavior(win, id, x, y, w, h)
+  recordItem(win, hovered, held, pressed)
+  local color = held and style.colors.buttonActive
+    or hovered and style.colors.buttonHovered
+    or style.colors.button
+  pushRect(win, "fill", x, y, w, h, color, style.rounding)
+  pushText(win, display, x + fpx, y, style.colors.text)
   return pressed
 end
 
@@ -606,6 +2259,7 @@ function imlove.Checkbox(label, value)
   local w = box + style.innerSpacing + tw
   local x, y = itemAdd(win, w, box)
   local hovered, held, pressed = behavior(win, id, x, y, w, box)
+  recordItem(win, hovered, held, pressed)
   if pressed then value = not value end
   local bg = held and style.colors.frameBgActive
     or hovered and style.colors.frameBgHovered
@@ -621,41 +2275,165 @@ function imlove.Checkbox(label, value)
   return value, pressed
 end
 
---- A horizontal slider for a float. Click or drag anywhere on the track to
---- set the value. Returns the (possibly changed) value plus a changed flag:
----   volume, changed = imlove.SliderFloat("Volume", volume, 0, 1)
---- Same Lua-ism as Checkbox: assign the returned value back.
-function imlove.SliderFloat(label, value, min, max)
-  local win = requireWindow("SliderFloat")
-  value = tonumber(value) or min
-  if win.skipItems then return value, false end
+--- A radio button: a circular Selectable. Pass whether it is the currently
+--- chosen option (it draws with a filled dot); returns true on the frame it
+--- is clicked — switching the selection is up to you, exactly like
+--- Selectable():
+---
+---   if imlove.RadioButton("Easy", difficulty == "easy") then
+---     difficulty = "easy"
+---   end
+---
+--- Equivalent of ImGui::RadioButton(label, active).
+function imlove.RadioButton(label, active)
+  local win = requireWindow("RadioButton")
+  if win.skipItems then return false end
   local display, idText = splitLabel(label)
   local id = makeId(idText)
+  local fpy = style.framePadding[2]
+  local box = ctx.font:getHeight() + fpy * 2
+  local tw = ctx.font:getWidth(display)
+  local w = box + style.innerSpacing + tw
+  local x, y = itemAdd(win, w, box)
+  local hovered, held, pressed = behavior(win, id, x, y, w, box)
+  recordItem(win, hovered, held, pressed)
+  local cx, cy, r = x + box * 0.5, y + box * 0.5, box * 0.5 - 1
+  local bg = held and style.colors.frameBgActive
+    or hovered and style.colors.frameBgHovered
+    or style.colors.frameBg
+  pushCircle(win, "fill", cx, cy, r, bg)
+  if active then
+    pushCircle(win, "fill", cx, cy, r * 0.5, style.colors.checkMark)
+  end
+  pushText(win, display, x + box + style.innerSpacing, y + fpy,
+    style.colors.text)
+  return pressed
+end
+
+-- Applies this frame's queued key/text events (ctx.frameEvents, latched by
+-- keypressed()/textinput() — see the bottom of this file) to the live edit
+-- buffer/cursor. Only ever called once per frame, by whichever widget
+-- currently holds focus (ctx.focusId). Returns commit (Enter fired), cancel
+-- (Escape fired).
+local function processEditEvents()
+  local commit, cancel = false, false
+  local events = ctx.frameEvents
+  for i = 1, #events do
+    local e = events[i]
+    if e.kind == "text" then
+      local off = utf8Offset(ctx.editBuf, ctx.editCursor)
+      ctx.editBuf = ctx.editBuf:sub(1, off - 1) .. e.text ..
+        ctx.editBuf:sub(off)
+      ctx.editCursor = ctx.editCursor + utf8Len(e.text)
+    elseif e.key == "backspace" then
+      if ctx.editCursor > 0 then
+        local a = utf8Offset(ctx.editBuf, ctx.editCursor - 1)
+        local b = utf8Offset(ctx.editBuf, ctx.editCursor)
+        ctx.editBuf = ctx.editBuf:sub(1, a - 1) .. ctx.editBuf:sub(b)
+        ctx.editCursor = ctx.editCursor - 1
+      end
+    elseif e.key == "delete" then
+      local n = utf8Len(ctx.editBuf)
+      if ctx.editCursor < n then
+        local a = utf8Offset(ctx.editBuf, ctx.editCursor)
+        local b = utf8Offset(ctx.editBuf, ctx.editCursor + 1)
+        ctx.editBuf = ctx.editBuf:sub(1, a - 1) .. ctx.editBuf:sub(b)
+      end
+    elseif e.key == "left" then
+      ctx.editCursor = math.max(ctx.editCursor - 1, 0)
+    elseif e.key == "right" then
+      ctx.editCursor = math.min(ctx.editCursor + 1, utf8Len(ctx.editBuf))
+    elseif e.key == "home" then
+      ctx.editCursor = 0
+    elseif e.key == "end" then
+      ctx.editCursor = utf8Len(ctx.editBuf)
+    elseif e.key == "enter" then
+      commit = true
+    elseif e.key == "escape" then
+      cancel = true
+    elseif e.key == "paste" then
+      local ok, clip = pcall(love.system.getClipboardText)
+      if ok and type(clip) == "string" and #clip > 0 then
+        -- Every field here is single-line: strip \r and flatten \n to a
+        -- space so pasted multi-line clipboard text can't splice a newline
+        -- into the buffer and break the one-line cursor/scroll math (or
+        -- paint a second line) — the same filtering ImGui's own single-line
+        -- InputText applies to a paste.
+        clip = clip:gsub("\r", ""):gsub("\n", " ")
+        local off = utf8Offset(ctx.editBuf, ctx.editCursor)
+        ctx.editBuf = ctx.editBuf:sub(1, off - 1) .. clip ..
+          ctx.editBuf:sub(off)
+        ctx.editCursor = ctx.editCursor + utf8Len(clip)
+      end
+    elseif e.key == "copy" then
+      if love.system and love.system.setClipboardText then
+        pcall(love.system.setClipboardText, ctx.editBuf)
+      end
+    end
+  end
+  return commit, cancel
+end
+
+-- Draws a focused field's frame, live buffer (clipped and horizontally
+-- scrolled so the cursor always stays visible), and a blinking cursor.
+-- Shared by InputText and the numeric editors (InputFloat/InputInt and
+-- ctrl-clicked sliders/drags all just display ctx.editBuf as plain text).
+local function drawEditField(win, x, y, w, h)
   local fpx, fpy = style.framePadding[1], style.framePadding[2]
+  pushRect(win, "fill", x, y, w, h, style.colors.frameBgActive, style.rounding)
+  local availW = math.max(w - fpx * 2, 0)
+  local buf = ctx.editBuf
+  local beforeCursor = buf:sub(1, utf8Offset(buf, ctx.editCursor) - 1)
+  local cursorX = ctx.font:getWidth(beforeCursor)
+  local totalW = ctx.font:getWidth(buf)
+  local scroll = ctx.editScrollX or 0
+  if cursorX - scroll > availW then scroll = cursorX - availW end
+  if cursorX - scroll < 0 then scroll = cursorX end
+  scroll = clamp(scroll, 0, math.max(totalW - availW, 0))
+  ctx.editScrollX = scroll
+
+  pushClip(win, x + fpx, y, availW, h)
+  pushText(win, buf, x + fpx - scroll, y + fpy, style.colors.text)
+  -- Blink cadence: ~30-frame bands off ctx.frame rather than love.timer, so
+  -- it's deterministic and exercisable from the headless tests.
+  local blinkOn =
+    math.floor((ctx.frame - (ctx.focusBlinkBase or ctx.frame)) / 30) % 2 == 0
+  if blinkOn then
+    local cx = x + fpx + cursorX - scroll
+    pushLine(win, cx, y + 2, cx, y + h - 2, style.colors.text)
+  end
+  popClip(win)
+end
+
+-- Shared layout for the four slider/drag widgets: resolves the id, measures
+-- the label, and places the (track + label) rectangle at the cursor.
+local function sliderSetup(win, label)
+  local display, idText = splitLabel(label)
+  local id = makeId(idText)
   local trackW, h = style.sliderWidth, frameHeight()
   local tw = ctx.font:getWidth(display)
   local totalW = trackW + (tw > 0 and style.innerSpacing + tw or 0)
   local x, y = itemAdd(win, totalW, h)
-  local hovered, held = behavior(win, id, x, y, trackW, h)
+  return id, display, tw, x, y, trackW, h
+end
 
-  local old = value
-  if held then
-    local t = clamp((ctx.mouse.x - x) / trackW, 0, 1)
-    value = min + t * (max - min)
-  end
-  value = clamp(value, math.min(min, max), math.max(min, max))
-
+-- Shared frame + (optional) grab + value-text + label rendering. `grabT`,
+-- if given (0..1), draws a slider grab at that fraction of the track —
+-- SliderFloat/SliderInt pass it; DragFloat/DragInt pass nil (no grab, same
+-- as before this was ever a shared function).
+local function sliderFrame(win, x, y, trackW, h, hovered, held, grabT,
+    valueText, display, tw)
+  local fpy = style.framePadding[2]
   local bg = held and style.colors.frameBgActive
     or hovered and style.colors.frameBgHovered
     or style.colors.frameBg
   pushRect(win, "fill", x, y, trackW, h, bg, style.rounding)
-  local range = max - min
-  local t = range ~= 0 and clamp((value - min) / range, 0, 1) or 0
-  local grabW = style.grabWidth
-  pushRect(win, "fill", x + 2 + t * (trackW - grabW - 4), y + 2,
-    grabW, h - 4, held and style.colors.sliderGrabActive
-    or style.colors.sliderGrab, style.rounding)
-  local valueText = string.format("%.3f", value)
+  if grabT then
+    local grabW = style.grabWidth
+    pushRect(win, "fill", x + 2 + grabT * (trackW - grabW - 4), y + 2,
+      grabW, h - 4, held and style.colors.sliderGrabActive
+      or style.colors.sliderGrab, style.rounding)
+  end
   pushText(win, valueText,
     x + (trackW - ctx.font:getWidth(valueText)) / 2, y + fpy,
     style.colors.text)
@@ -663,7 +2441,301 @@ function imlove.SliderFloat(label, value, min, max)
     pushText(win, display, x + trackW + style.innerSpacing, y + fpy,
       style.colors.text)
   end
-  return value, value ~= old
+end
+
+-- Ctrl-click on a slider/drag widget turns it into a temporary numeric text
+-- editor (same event queue/editing machinery as InputText) until Enter
+-- commits, Escape reverts, or a click elsewhere defocuses it (NewFrame()'s
+-- click-away handling is generic, not widget-specific — see setFocus()).
+-- `value` seeds/reverts the editor; `round`, if given, is applied to a
+-- successfully parsed result (SliderInt/DragInt pass round-to-nearest,
+-- matching their own click/drag rounding — InputInt's plain floor() is a
+-- deliberately different rule, see its own comment). `min`/`max` (either may
+-- be nil) clamp the committed value, same rule as dragValue(). Returns
+-- newValue, changed, stillEditing.
+local function numericEditOverlay(value, round, min, max)
+  local commit, cancel = processEditEvents()
+  if not commit and not cancel then
+    -- A deferred click-away (see NewFrame()'s ctx.focusDefocusPending) with
+    -- no Enter/Escape this frame is exactly "stop editing without
+    -- committing" — same as this function's own doc comment already
+    -- promises for a plain click elsewhere — so finish the defocus here,
+    -- now that processEditEvents() above has had its chance to drain this
+    -- frame's events, instead of leaving it pending for a widget that's
+    -- about to render itself as no-longer-focused.
+    if ctx.focusDefocusPending then
+      clearFocus()
+      return value, false, false
+    end
+    return value, false, true
+  end
+  local v
+  if cancel then
+    v = ctx.editOriginal
+  else
+    local parsed = tonumber(ctx.editBuf)
+    if parsed then
+      if round then parsed = round(parsed) end
+      if min and max then
+        parsed = clamp(parsed, math.min(min, max), math.max(min, max))
+      elseif min then
+        parsed = math.max(parsed, min)
+      elseif max then
+        parsed = math.min(parsed, max)
+      end
+      v = parsed
+    else
+      v = ctx.editOriginal
+    end
+  end
+  clearFocus()
+  return v, v ~= value, false
+end
+
+local function roundNearest(v) return math.floor(v + 0.5) end
+
+--- A horizontal slider for a float. Click or drag anywhere on the track to
+--- set the value. Returns the (possibly changed) value plus a changed flag:
+---   volume, changed = imlove.SliderFloat("Volume", volume, 0, 1)
+--- Same Lua-ism as Checkbox: assign the returned value back. Ctrl+click
+--- turns it into a numeric text editor instead — type an exact value; Enter
+--- commits it (clamped to min/max), Escape reverts, clicking elsewhere just
+--- stops editing without committing. Equivalent of ImGui::SliderFloat(),
+--- including the ctrl-click-to-type behavior.
+function imlove.SliderFloat(label, value, min, max)
+  local win = requireWindow("SliderFloat")
+  value = tonumber(value) or min
+  local inputValue = value -- captured before any edit-commit reassignment,
+                            -- below, so `changed` compares against what the
+                            -- caller actually passed in, not a value this
+                            -- same call already overwrote
+  if win.skipItems then return value, false end
+  local id, display, tw, x, y, trackW, h = sliderSetup(win, label)
+  local hovered, held = behavior(win, id, x, y, trackW, h)
+
+  if hovered and ctx.mouse.pressed and ctrlHeld() and ctx.focusId ~= id then
+    ctx.activeId = nil
+    held = false
+    setFocus(id, string.format("%.3f", value), value)
+  end
+
+  if ctx.focusId == id then
+    ctx.focusRect = { x = x, y = y, w = trackW, h = h }
+    ctx.focusStamp = ctx.frame
+    local newValue, changed, editing = numericEditOverlay(value, nil, min, max)
+    recordItem(win, hovered, editing, false)
+    if editing then
+      drawEditField(win, x, y, trackW, h)
+      if tw > 0 then
+        pushText(win, display, x + trackW + style.innerSpacing,
+          y + style.framePadding[2], style.colors.text)
+      end
+      return value, false
+    end
+    value, held = newValue, false
+  else
+    recordItem(win, hovered, held, false)
+  end
+
+  if held then
+    local t = clamp((ctx.mouse.x - x) / trackW, 0, 1)
+    value = min + t * (max - min)
+  end
+  value = clamp(value, math.min(min, max), math.max(min, max))
+  local range = max - min
+  local t = range ~= 0 and clamp((value - min) / range, 0, 1) or 0
+  sliderFrame(win, x, y, trackW, h, hovered, held, t,
+    string.format("%.3f", value), display, tw)
+  return value, value ~= inputValue
+end
+
+--- A horizontal slider for an integer, stepped and displayed as "%d". Same
+--- click/drag/return contract as SliderFloat(), including ctrl-click-to-type
+--- (committed values round to the nearest integer, same as dragging does).
+--- Equivalent of ImGui::SliderInt().
+function imlove.SliderInt(label, value, min, max)
+  local win = requireWindow("SliderInt")
+  value = math.floor(tonumber(value) or min)
+  local inputValue = value -- see SliderFloat()'s comment on this
+  if win.skipItems then return value, false end
+  local id, display, tw, x, y, trackW, h = sliderSetup(win, label)
+  local hovered, held = behavior(win, id, x, y, trackW, h)
+
+  if hovered and ctx.mouse.pressed and ctrlHeld() and ctx.focusId ~= id then
+    ctx.activeId = nil
+    held = false
+    setFocus(id, string.format("%d", value), value)
+  end
+
+  if ctx.focusId == id then
+    ctx.focusRect = { x = x, y = y, w = trackW, h = h }
+    ctx.focusStamp = ctx.frame
+    local newValue, changed, editing =
+      numericEditOverlay(value, roundNearest, min, max)
+    recordItem(win, hovered, editing, false)
+    if editing then
+      drawEditField(win, x, y, trackW, h)
+      if tw > 0 then
+        pushText(win, display, x + trackW + style.innerSpacing,
+          y + style.framePadding[2], style.colors.text)
+      end
+      return value, false
+    end
+    value, held = newValue, false
+  else
+    recordItem(win, hovered, held, false)
+  end
+
+  if held then
+    local t = clamp((ctx.mouse.x - x) / trackW, 0, 1)
+    value = min + t * (max - min)
+  end
+  value = clamp(value, math.min(min, max), math.max(min, max))
+  value = math.floor(value + 0.5)
+  local range = max - min
+  local t = range ~= 0 and clamp((value - min) / range, 0, 1) or 0
+  sliderFrame(win, x, y, trackW, h, hovered, held, t,
+    string.format("%d", value), display, tw)
+  return value, value ~= inputValue
+end
+
+-- Shared drag math for DragFloat/DragInt: while held, the value tracks
+-- horizontal mouse movement scaled by speed, anchored to the value and
+-- mouse position captured the frame the drag began. Anchoring (rather than
+-- accumulating a per-frame delta) means the value can never drift from
+-- rounding error, and a click that doesn't move the mouse changes nothing —
+-- unlike SliderFloat, a Drag widget never "jumps" to a clicked position.
+local function dragValue(id, held, value, speed, min, max)
+  if held then
+    local anchor = ctx.dragAnchor
+    if not anchor or anchor.id ~= id then
+      anchor = { id = id, x = ctx.mouse.x, value = value }
+      ctx.dragAnchor = anchor
+    end
+    value = anchor.value + (ctx.mouse.x - anchor.x) * speed
+    if min and max then
+      value = clamp(value, math.min(min, max), math.max(min, max))
+    elseif min then
+      value = math.max(value, min)
+    elseif max then
+      value = math.min(value, max)
+    end
+  elseif ctx.dragAnchor and ctx.dragAnchor.id == id then
+    ctx.dragAnchor = nil
+  end
+  return value
+end
+
+--- An unbounded (by default) float editor: click and drag horizontally to
+--- change the value by speed per pixel, instead of mapping the whole track
+--- to a fixed range like SliderFloat. min/max are optional — nil means
+--- unbounded on that side (ImGui uses a 0, 0 sentinel for this; Lua just
+--- omits the argument). speed defaults to 1.0, ImGui's default. Returns
+--- value, changed like every other value widget. Ctrl+click turns it into a
+--- numeric text editor, exactly like SliderFloat, clamped only to whichever
+--- of min/max are given. Equivalent of ImGui::DragFloat().
+function imlove.DragFloat(label, value, speed, min, max)
+  local win = requireWindow("DragFloat")
+  value = tonumber(value) or 0
+  local inputValue = value -- see SliderFloat()'s comment on this
+  if win.skipItems then return value, false end
+  speed = speed or 1.0
+  local id, display, tw, x, y, trackW, h = sliderSetup(win, label)
+  local hovered, held = behavior(win, id, x, y, trackW, h)
+
+  if hovered and ctx.mouse.pressed and ctrlHeld() and ctx.focusId ~= id then
+    ctx.activeId = nil
+    held = false
+    setFocus(id, string.format("%.3f", value), value)
+  end
+
+  if ctx.focusId == id then
+    ctx.focusRect = { x = x, y = y, w = trackW, h = h }
+    ctx.focusStamp = ctx.frame
+    local newValue, changed, editing = numericEditOverlay(value, nil, min, max)
+    recordItem(win, hovered, editing, false)
+    if editing then
+      drawEditField(win, x, y, trackW, h)
+      if tw > 0 then
+        pushText(win, display, x + trackW + style.innerSpacing,
+          y + style.framePadding[2], style.colors.text)
+      end
+      return value, false
+    end
+    value, held = newValue, false
+  else
+    recordItem(win, hovered, held, false)
+  end
+
+  value = dragValue(id, held, value, speed, min, max)
+  sliderFrame(win, x, y, trackW, h, hovered, held, nil,
+    string.format("%.3f", value), display, tw)
+  return value, value ~= inputValue
+end
+
+--- The integer counterpart of DragFloat(): speed defaults to 1, and the
+--- value is rounded to the nearest integer. Ctrl+click-to-type rounds the
+--- same way. Equivalent of ImGui::DragInt().
+function imlove.DragInt(label, value, speed, min, max)
+  local win = requireWindow("DragInt")
+  value = math.floor(tonumber(value) or 0)
+  local inputValue = value -- see SliderFloat()'s comment on this
+  if win.skipItems then return value, false end
+  speed = speed or 1
+  local id, display, tw, x, y, trackW, h = sliderSetup(win, label)
+  local hovered, held = behavior(win, id, x, y, trackW, h)
+
+  if hovered and ctx.mouse.pressed and ctrlHeld() and ctx.focusId ~= id then
+    ctx.activeId = nil
+    held = false
+    setFocus(id, string.format("%d", value), value)
+  end
+
+  if ctx.focusId == id then
+    ctx.focusRect = { x = x, y = y, w = trackW, h = h }
+    ctx.focusStamp = ctx.frame
+    local newValue, changed, editing =
+      numericEditOverlay(value, roundNearest, min, max)
+    recordItem(win, hovered, editing, false)
+    if editing then
+      drawEditField(win, x, y, trackW, h)
+      if tw > 0 then
+        pushText(win, display, x + trackW + style.innerSpacing,
+          y + style.framePadding[2], style.colors.text)
+      end
+      return value, false
+    end
+    value, held = newValue, false
+  else
+    recordItem(win, hovered, held, false)
+  end
+
+  value = math.floor(dragValue(id, held, value, speed, min, max) + 0.5)
+  sliderFrame(win, x, y, trackW, h, hovered, held, nil,
+    string.format("%d", value), display, tw)
+  return value, value ~= inputValue
+end
+
+--- A progress bar filled to fraction (clamped to 0..1). w/h default to the
+--- slider width and frame height; overlay defaults to a centered "NN%"
+--- label, or pass your own string. Equivalent of ImGui::ProgressBar().
+function imlove.ProgressBar(fraction, w, h, overlay)
+  local win = requireWindow("ProgressBar")
+  fraction = clamp(tonumber(fraction) or 0, 0, 1)
+  if win.skipItems then return end
+  w = (w and w > 0) and w or style.sliderWidth
+  h = (h and h > 0) and h or frameHeight()
+  local x, y = itemAddPassive(win, w, h)
+  pushRect(win, "fill", x, y, w, h, style.colors.frameBg, style.rounding)
+  if fraction > 0 then
+    pushRect(win, "fill", x, y, w * fraction, h, style.colors.sliderGrab,
+      style.rounding)
+  end
+  local text = overlay or string.format("%d%%",
+    math.floor(fraction * 100 + 0.5))
+  local tw = ctx.font:getWidth(text)
+  pushText(win, text, x + (w - tw) / 2, y + style.framePadding[2],
+    style.colors.text)
 end
 
 --- A collapsible tree node. Returns whether it is open; when it is, its
@@ -689,6 +2761,7 @@ function imlove.TreeNode(label)
   local w = arrow + style.innerSpacing + ctx.font:getWidth(display)
   local x, y = itemAdd(win, w, h)
   local hovered, held, pressed = behavior(win, id, x, y, w, h)
+  recordItem(win, hovered, held, pressed)
   if pressed then
     open = not open
     ctx.openNodes[id] = open
@@ -727,6 +2800,57 @@ function imlove.TreePop()
   win.indent = win.indent - style.indent
 end
 
+--- A full-width framed header, for organizing a debug panel into sections.
+--- Unlike TreeNode(), it doesn't indent its content and doesn't push
+--- anything onto the ID stack, and there is no matching "Pop" call — put
+--- your following widgets directly under it:
+---
+---   if imlove.CollapsingHeader("Rendering") then
+---     imlove.Text("...")
+---   end
+---
+--- Open state persists across frames, keyed like every other widget id.
+--- defaultOpen (optional, default false) only matters the very first time
+--- this id is ever seen — like ImGui's ImGuiTreeNodeFlags_DefaultOpen, it
+--- seeds the initial state, and never overrides whatever the user has since
+--- clicked it to.
+--- Equivalent of ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen).
+function imlove.CollapsingHeader(label, defaultOpen)
+  local win = requireWindow("CollapsingHeader")
+  if win.skipItems then return false end
+  local display, idText = splitLabel(label)
+  local id = makeId(idText)
+  if ctx.openNodes[id] == nil then ctx.openNodes[id] = defaultOpen == true end
+  local open = ctx.openNodes[id] == true
+  local fpx, fpy = style.framePadding[1], style.framePadding[2]
+  local h = frameHeight()
+  local arrow = ctx.font:getHeight()
+  local w = math.max(availWidth(win),
+    arrow + style.innerSpacing + ctx.font:getWidth(display) + fpx * 2)
+  local x, y = itemAdd(win, w, h)
+  local hovered, held, pressed = behavior(win, id, x, y, w, h)
+  recordItem(win, hovered, held, pressed)
+  if pressed then
+    open = not open
+    ctx.openNodes[id] = open
+  end
+  local bg = held and style.colors.frameBgActive
+    or hovered and style.colors.headerHovered
+    or style.colors.frameBg
+  pushRect(win, "fill", x, y, w, h, bg, style.rounding)
+  local cx, cy, r = x + fpx + arrow * 0.5, y + h * 0.5, arrow * 0.3
+  if open then
+    pushTriangle(win, cx - r, cy - r * 0.6, cx + r, cy - r * 0.6,
+      cx, cy + r, style.colors.text)
+  else
+    pushTriangle(win, cx - r * 0.6, cy - r, cx - r * 0.6, cy + r,
+      cx + r, cy, style.colors.text)
+  end
+  pushText(win, display, x + fpx + arrow + style.innerSpacing, y + fpy,
+    style.colors.text)
+  return open
+end
+
 --- A selectable row spanning the window width, for pick-one-from-a-list UIs.
 --- Pass whether this row is currently selected (it draws highlighted);
 --- returns true on the frame it is clicked — updating your selection is up
@@ -746,6 +2870,7 @@ function imlove.Selectable(label, selected)
   local h = frameHeight()
   local x, y = itemAdd(win, w, h)
   local hovered, held, pressed = behavior(win, id, x, y, w, h)
+  recordItem(win, hovered, held, pressed)
   if hovered or held then
     pushRect(win, "fill", x, y, w, h, style.colors.headerHovered,
       style.rounding)
@@ -761,16 +2886,771 @@ function imlove.Separator()
   local win = requireWindow("Separator")
   if win.skipItems then return end
   local w = math.max(availWidth(win), 1)
-  local x, y = itemAdd(win, w, 1)
+  local x, y = itemAddPassive(win, w, 1)
   pushLine(win, x, y + 0.5, x + w, y + 0.5, style.colors.separator)
 end
 
+--- A blank vertical gap the size of one item spacing. Equivalent of
+--- ImGui::Spacing().
+function imlove.Spacing()
+  local win = requireWindow("Spacing")
+  if win.skipItems then return end
+  itemAddPassive(win, 0, 0)
+end
+
+--- Forces the next widget onto a new row, even right after SameLine().
+--- Equivalent of ImGui::NewLine().
+function imlove.NewLine()
+  local win = requireWindow("NewLine")
+  if win.skipItems then return end
+  win.sameLineX = nil -- cancel any pending SameLine(): really start a row
+  itemAddPassive(win, 0, ctx.font:getHeight())
+end
+
+--- Reserves a w x h blank rectangle in the layout — a spacer, or a stand-in
+--- for a widget you draw yourself. Equivalent of ImGui::Dummy().
+function imlove.Dummy(w, h)
+  local win = requireWindow("Dummy")
+  if win.skipItems then return end
+  itemAddPassive(win, w, h)
+end
+
+--- Shifts every following widget in this window right by w (default:
+--- style's indent). Call Unindent() with the same w to undo it — unlike
+--- TreeNode(), this is a plain cursor shift with no ID stack involved, so it
+--- nests however you call it. Equivalent of ImGui::Indent().
+function imlove.Indent(w)
+  local win = requireWindow("Indent")
+  if win.skipItems then return end
+  win.indent = win.indent + ((w and w ~= 0) and w or style.indent)
+end
+
+--- Undoes Indent(w). Equivalent of ImGui::Unindent().
+function imlove.Unindent(w)
+  local win = requireWindow("Unindent")
+  if win.skipItems then return end
+  win.indent = win.indent - ((w and w ~= 0) and w or style.indent)
+end
+
 --- Place the next widget on the same line as the previous one instead of
---- below it. Equivalent of ImGui::SameLine().
-function imlove.SameLine()
+--- below it. With no arguments, continues right after the previous item
+--- plus one item spacing — the v1 behavior. offsetFromStartX, if non-zero,
+--- instead places it at that x offset from the window's content start
+--- (handy for aligning a column of trailing widgets). spacing, if given,
+--- overrides the default item-spacing gap. Equivalent of ImGui::SameLine().
+function imlove.SameLine(offsetFromStartX, spacing)
   local win = requireWindow("SameLine")
   if win.skipItems then return end
-  win.sameLineX = win.prevItem.x + win.prevItem.w + style.itemSpacing[1]
+  if offsetFromStartX and offsetFromStartX ~= 0 then
+    win.sameLineX = win.innerX + win.indent + offsetFromStartX
+  else
+    win.sameLineX = win.prevItem.x + win.prevItem.w
+      + (spacing or style.itemSpacing[1])
+  end
+end
+
+-- Auto-range for PlotLines/PlotHistogram when scaleMin/scaleMax are nil:
+-- the min/max of the sampled values, like ImGui's FLT_MAX sentinel does.
+local function autoRange(values)
+  local lo, hi = math.huge, -math.huge
+  for i = 1, #values do
+    local v = values[i]
+    if v < lo then lo = v end
+    if v > hi then hi = v end
+  end
+  if lo > hi then lo, hi = 0, 0 end -- no samples: avoid returning +/-inf
+  return lo, hi
+end
+
+-- Shared layout/drawing for PlotLines/PlotHistogram: only the plotted shape
+-- differs between them.
+local function plotWidget(win, kind, label, values, scaleMin, scaleMax,
+    w, h, overlay)
+  local display, idText = splitLabel(label)
+  local fpy = style.framePadding[2]
+  w = (w and w > 0) and w or style.sliderWidth
+  h = (h and h > 0) and h or frameHeight() * 3
+  local tw = ctx.font:getWidth(display)
+  local totalW = w + (tw > 0 and style.innerSpacing + tw or 0)
+  local x, y = itemAddPassive(win, totalW, h)
+  pushRect(win, "fill", x, y, w, h, style.colors.frameBg, style.rounding)
+
+  local n = #values
+  if n > 0 then
+    local lo = scaleMin
+    local hi = scaleMax
+    if not lo or not hi then
+      local autoLo, autoHi = autoRange(values)
+      lo = lo or autoLo
+      hi = hi or autoHi
+    end
+    local range = hi - lo
+    local function plotY(v)
+      local t = range ~= 0 and clamp((v - lo) / range, 0, 1) or 0.5
+      return y + h - t * h
+    end
+
+    if kind == "lines" then
+      for i = 1, n - 1 do
+        local x1 = x + (i - 1) / (n - 1) * w
+        local x2 = x + i / (n - 1) * w
+        pushLine(win, x1, plotY(values[i]), x2, plotY(values[i + 1]),
+          style.colors.sliderGrab)
+      end
+    else -- "histogram"
+      local barW = w / n
+      for i = 1, n do
+        local bx = x + (i - 1) * barW
+        local by = plotY(values[i])
+        pushRect(win, "fill", bx, by, math.max(barW - 1, 1), y + h - by,
+          style.colors.sliderGrab)
+      end
+    end
+  end
+
+  if overlay then
+    local ow = ctx.font:getWidth(overlay)
+    pushText(win, overlay, x + (w - ow) / 2, y + fpy, style.colors.text)
+  end
+  if tw > 0 then
+    pushText(win, display, x + w + style.innerSpacing,
+      y + (h - ctx.font:getHeight()) / 2, style.colors.text)
+  end
+end
+
+--- A line-graph plot of values (a plain Lua array of numbers), the
+--- canonical "FPS over time" debug widget:
+---
+---   imlove.PlotLines("frame time", history, 0, 0.05)
+---
+--- scaleMin/scaleMax default to the min/max found in values when nil. w/h
+--- default to the slider width and three line-heights. overlay, if given,
+--- is centered on top of the plot (e.g. a current-value readout) instead of
+--- the label, which is drawn to the right like SliderFloat's.
+--- Equivalent of ImGui::PlotLines().
+function imlove.PlotLines(label, values, scaleMin, scaleMax, w, h, overlay)
+  local win = requireWindow("PlotLines")
+  if win.skipItems then return end
+  plotWidget(win, "lines", label, values, scaleMin, scaleMax, w, h, overlay)
+end
+
+--- Same signature and semantics as PlotLines(), drawn as vertical bars
+--- instead of a connected line. Equivalent of ImGui::PlotHistogram().
+function imlove.PlotHistogram(label, values, scaleMin, scaleMax, w, h,
+    overlay)
+  local win = requireWindow("PlotHistogram")
+  if win.skipItems then return end
+  plotWidget(win, "histogram", label, values, scaleMin, scaleMax, w, h,
+    overlay)
+end
+
+--- A dropdown: shows `items[value]` (a plain array of strings) in a slider-
+--- width preview box with a small arrow, click to open a popup listing every
+--- item as a Selectable(), pick one to close it. Returns the (possibly
+--- changed) value plus a changed flag, same convention as SliderFloat:
+---
+---   quality, changed = imlove.Combo("Quality", quality, {"Low", "Medium", "High"})
+---
+--- DEVIATION from ImGui: value is a 1-based index into items (Lua
+--- convention), not a 0-based int. An out-of-range value (including 0 or
+--- nil) shows an empty preview instead of erroring — handy for "nothing
+--- selected yet". Reuses the same popup machinery as BeginPopup(); the
+--- dropdown is drawn and dismissed exactly like any other popup, it just
+--- opens and closes itself instead of requiring your own OpenPopup() call.
+--- Equivalent of ImGui::Combo().
+function imlove.Combo(label, value, items)
+  local win = requireWindow("Combo")
+  if win.skipItems then return value, false end
+  local display, idText = splitLabel(label)
+  local id = makeId(idText)
+  local fpx, fpy = style.framePadding[1], style.framePadding[2]
+  local boxW, h = style.sliderWidth, frameHeight()
+  local tw = ctx.font:getWidth(display)
+  local totalW = boxW + (tw > 0 and style.innerSpacing + tw or 0)
+  local x, y = itemAdd(win, totalW, h)
+  local hovered, held = behavior(win, id, x, y, boxW, h)
+  recordItem(win, hovered, held, false)
+
+  local popId = popupId(idText)
+  local isOpen = popupIsOpen(popId)
+  if hovered and ctx.mouse.pressed then
+    -- Press-time toggle (not release-time like most widgets): the generic
+    -- outside-press dismiss-scan in NewFrame() also runs at press-time, and
+    -- this box is registered as that popup's ownerRect, so a press here
+    -- while open is never treated as an outside/dismiss click — it reaches
+    -- here and this toggle is the only thing that closes it.
+    if isOpen then
+      closePopup(popId)
+    else
+      openPopupById(popId, "popup", { x = x, y = y, w = boxW, h = h },
+        x, y + h + 2)
+    end
+    isOpen = not isOpen
+  end
+
+  local bg = held and style.colors.frameBgActive
+    or hovered and style.colors.frameBgHovered
+    or style.colors.frameBg
+  pushRect(win, "fill", x, y, boxW, h, bg, style.rounding)
+  local preview = items and items[value]
+  if preview then
+    pushText(win, tostring(preview), x + fpx, y + fpy, style.colors.text)
+  end
+  local ax, ay = x + boxW - fpx - 4, y + h / 2
+  pushTriangle(win, ax - 4, ay - 2.5, ax + 4, ay - 2.5, ax, ay + 3,
+    style.colors.text)
+  if tw > 0 then
+    pushText(win, display, x + boxW + style.innerSpacing, y + fpy,
+      style.colors.text)
+  end
+
+  -- A pick reports changed = true unconditionally, even re-picking the
+  -- already-selected item — matching ImGui's Combo (it sets value_changed
+  -- on the click itself, not on whether the index actually moved). Only
+  -- "opened it, picked nothing, dismissed it" is changed = false.
+  local picked = false
+  if isOpen then
+    beginPopupContent(popId, idText, "popup", nil)
+    for i, item in ipairs(items or {}) do
+      imlove.PushID(i)
+      if imlove.Selectable(tostring(item), i == value) then
+        value = i
+        picked = true
+        closePopup(popId)
+      end
+      imlove.PopID()
+    end
+    endPopupContent(ctx.currentWindow)
+  end
+  return value, picked
+end
+
+--- An inline, scrollable list of items (a plain array of strings) shown as
+--- Selectable() rows in a fixed-height child region — pick one to select
+--- it. Returns the (possibly changed) value plus a changed flag, same
+--- convention as Combo():
+---
+---   choice, changed = imlove.ListBox("Level", choice, levelNames, 6)
+---
+--- DEVIATION from ImGui: value is a 1-based index into items, same as
+--- Combo(). heightInItems defaults to 7 (ImGui's default too), i.e. the
+--- box is tall enough to show that many rows before it starts scrolling.
+--- Equivalent of ImGui::ListBox().
+function imlove.ListBox(label, value, items, heightInItems)
+  local win = requireWindow("ListBox")
+  if win.skipItems then return value, false end
+  local display, idText = splitLabel(label)
+  local rowH = frameHeight()
+  local boxH = rowH * (heightInItems or 7) + style.windowPadding * 2
+
+  -- Same "changed = true on any pick, even the already-selected row" rule
+  -- as Combo() — see its comment.
+  local picked = false
+  imlove.BeginChild("##listbox_" .. idText, style.sliderWidth, boxH, true)
+  for i, item in ipairs(items or {}) do
+    imlove.PushID(i)
+    if imlove.Selectable(tostring(item), i == value) then
+      value = i
+      picked = true
+    end
+    imlove.PopID()
+  end
+  imlove.EndChild()
+
+  if #display > 0 then
+    imlove.SameLine()
+    imlove.Text("%s", display)
+  end
+  return value, picked
+end
+
+--------------------------------------------------------------------------------
+-- Text input: InputText/InputFloat/InputInt. The first widgets to make
+-- io.WantCaptureKeyboard (and the keypressed()/textinput() forwarders at the
+-- bottom of this file) do anything — see setFocus()/clearFocus()/
+-- processEditEvents()/drawEditField() above, and NewFrame()'s focus
+-- lifecycle (click-away, modal lockout, stale cleanup).
+--------------------------------------------------------------------------------
+
+local VALID_INPUTTEXT_FLAGS = {
+  EnterReturnsTrue = true, -- keep returning the OLD text (changed = false)
+                           -- while typing; only Enter commits the new text
+                           -- (changed = true, once)
+}
+
+--- A single-line text field. Click it to gain keyboard focus (a blinking
+--- cursor appears); type to insert at the cursor from love.textinput()/
+--- love.keypressed() (wiring BOTH forwarders — see the bottom of this file —
+--- is now REQUIRED for typing to work). Enter commits and defocuses; Escape
+--- reverts to the text the field had when it gained focus and defocuses;
+--- clicking anywhere outside the field also defocuses it, without consuming
+--- that click — it still reaches whatever it landed on. Backspace/Delete/
+--- Left/Right/Home/End all work; the text scrolls horizontally inside the
+--- frame so the cursor stays visible. Ctrl+V pastes at the cursor; Ctrl+C
+--- copies the WHOLE field — there is no selection (and so no partial copy,
+--- no word-left/word-right) in v1.4, a documented deviation from ImGui.
+---
+--- By default, returns the LIVE edit buffer with changed = true on every
+--- keystroke — assign it back like any other imlove value, and it updates
+--- as the user types. Pass the "EnterReturnsTrue" flag for ImGui's other
+--- mode instead: keeps returning the OLD text (changed = false) while
+--- typing, and returns the new text with changed = true only once, the
+--- frame Enter commits it. `flags` is a string or array of strings.
+--- Equivalent of ImGui::InputText().
+function imlove.InputText(label, text, flags)
+  local win = requireWindow("InputText")
+  text = tostring(text)
+  if win.skipItems then return text, false end
+  local flagSet = normalizeFlags(flags, "InputText", VALID_INPUTTEXT_FLAGS)
+  local display, idText = splitLabel(label)
+  local id = makeId(idText)
+  local fpx, fpy = style.framePadding[1], style.framePadding[2]
+  local fieldW, h = style.sliderWidth, frameHeight()
+  local tw = ctx.font:getWidth(display)
+  local totalW = fieldW + (tw > 0 and style.innerSpacing + tw or 0)
+  local x, y = itemAdd(win, totalW, h)
+  local hovered, held, pressed = behavior(win, id, x, y, fieldW, h)
+
+  if pressed and ctx.focusId ~= id then
+    setFocus(id, text, text)
+  end
+
+  local focused = ctx.focusId == id
+  local resultText = text
+  if focused then
+    ctx.focusRect = { x = x, y = y, w = fieldW, h = h }
+    ctx.focusStamp = ctx.frame
+    local commit, cancel = processEditEvents()
+    if cancel then
+      resultText = ctx.editOriginal
+      clearFocus()
+    elseif commit then
+      resultText = ctx.editBuf
+      clearFocus()
+    else
+      resultText = flagSet.EnterReturnsTrue and text or ctx.editBuf
+      -- A deferred click-away (see NewFrame()'s ctx.focusDefocusPending):
+      -- neither Enter nor Escape fired, so this is "stop editing without
+      -- committing" — same result the branch above already computes —
+      -- finish the defocus now that processEditEvents() has drained this
+      -- frame's events, instead of leaving it pending.
+      if ctx.focusDefocusPending then clearFocus() end
+    end
+  end
+  focused = ctx.focusId == id -- may have just cleared via commit/cancel/
+                               -- deferred-click-away above
+
+  recordItem(win, hovered, focused, pressed)
+
+  if focused then
+    drawEditField(win, x, y, fieldW, h)
+  else
+    local bg = hovered and style.colors.frameBgHovered or style.colors.frameBg
+    pushRect(win, "fill", x, y, fieldW, h, bg, style.rounding)
+    pushClip(win, x + fpx, y, math.max(fieldW - fpx * 2, 0), h)
+    pushText(win, resultText, x + fpx, y + fpy, style.colors.text)
+    popClip(win)
+  end
+  if tw > 0 then
+    pushText(win, display, x + fieldW + style.innerSpacing, y + fpy,
+      style.colors.text)
+  end
+
+  return resultText, resultText ~= text
+end
+
+-- Shared by InputFloat/InputInt: a numeric InputText plus, when a nonzero
+-- step is given, small "-"/"+" buttons that nudge the value directly
+-- (bypassing text parsing entirely, so they always work even mid-edit).
+-- `round`, if given, is applied to both a successfully parsed value and a
+-- stepped value (InputInt passes math.floor — flooring, not rounding, is
+-- the documented behavior: typing "3.7" and committing gives 3).
+local function numericInput(fnName, label, value, step, round)
+  local win = requireWindow(fnName)
+  value = tonumber(value) or 0
+  if round then value = round(value) end
+  if win.skipItems then return value, false end
+  local display, idText = splitLabel(label)
+  local id = makeId(idText)
+  local fpx, fpy = style.framePadding[1], style.framePadding[2]
+  local h = frameHeight()
+  local hasStep = step ~= nil and step ~= 0
+  local btnSize, gap = h, 4
+  local fieldW = style.sliderWidth
+  local tw = ctx.font:getWidth(display)
+  local totalW = fieldW + (hasStep and (btnSize * 2 + gap * 2) or 0)
+    + (tw > 0 and style.innerSpacing + tw or 0)
+  local x, y = itemAdd(win, totalW, h)
+  local fmt = round and "%d" or "%.3f"
+
+  local hovered, held, pressed = behavior(win, id, x, y, fieldW, h)
+  if pressed and ctx.focusId ~= id then
+    setFocus(id, string.format(fmt, value), value)
+  end
+
+  local focused = ctx.focusId == id
+  local resultValue = value
+  if focused then
+    ctx.focusRect = { x = x, y = y, w = fieldW, h = h }
+    ctx.focusStamp = ctx.frame
+    local commit, cancel = processEditEvents()
+    if cancel then
+      resultValue = ctx.editOriginal
+      clearFocus()
+    elseif commit then
+      local parsed = tonumber(ctx.editBuf)
+      resultValue = parsed and (round and round(parsed) or parsed)
+        or ctx.editOriginal
+      clearFocus()
+    else
+      local parsed = tonumber(ctx.editBuf)
+      if parsed then resultValue = round and round(parsed) or parsed end
+      -- A deferred click-away (see NewFrame()'s ctx.focusDefocusPending):
+      -- neither Enter nor Escape fired, so finish the defocus now that
+      -- processEditEvents() has drained this frame's events — resultValue
+      -- above already reflects the live buffer, same as any other frame
+      -- while typing, so there's nothing else to do but stop editing.
+      if ctx.focusDefocusPending then clearFocus() end
+    end
+  end
+  focused = ctx.focusId == id -- may have just cleared via commit/cancel/
+                               -- deferred-click-away above
+
+  recordItem(win, hovered, focused, pressed)
+
+  if focused then
+    drawEditField(win, x, y, fieldW, h)
+  else
+    local bg = hovered and style.colors.frameBgHovered or style.colors.frameBg
+    pushRect(win, "fill", x, y, fieldW, h, bg, style.rounding)
+    pushClip(win, x + fpx, y, math.max(fieldW - fpx * 2, 0), h)
+    pushText(win, string.format(fmt, resultValue), x + fpx, y + fpy,
+      style.colors.text)
+    popClip(win)
+  end
+
+  local bx = x + fieldW + gap
+  if hasStep then
+    local minusId, plusId = makeId(idText .. "#minus"), makeId(idText .. "#plus")
+    local function stepBtn(bid, glyph, bx2)
+      local h2, hd2, pr2 = behavior(win, bid, bx2, y, btnSize, btnSize)
+      local color = hd2 and style.colors.buttonActive
+        or h2 and style.colors.buttonHovered or style.colors.button
+      pushRect(win, "fill", bx2, y, btnSize, btnSize, color, style.rounding)
+      local gw = ctx.font:getWidth(glyph)
+      pushText(win, glyph, bx2 + (btnSize - gw) / 2,
+        y + (btnSize - ctx.font:getHeight()) / 2, style.colors.text)
+      return pr2
+    end
+    -- A step button's rect is always OUTSIDE the field's own focusRect, so
+    -- clicking one while the field is focused already triggers NewFrame()'s
+    -- click-away defocus (deferred or not) before this point runs — `focused`
+    -- above already reflects that, and resultValue already reflects the live
+    -- edit buffer (parsed above), so stepping just nudges it further; there
+    -- is never a still-focused field left here to clear.
+    if stepBtn(minusId, "-", bx) then
+      resultValue = resultValue - step
+      if round then resultValue = round(resultValue) end
+    end
+    bx = bx + btnSize + gap
+    if stepBtn(plusId, "+", bx) then
+      resultValue = resultValue + step
+      if round then resultValue = round(resultValue) end
+    end
+    bx = bx + btnSize
+  end
+
+  if tw > 0 then
+    pushText(win, display, bx + style.innerSpacing, y + fpy, style.colors.text)
+  end
+
+  return resultValue, resultValue ~= value
+end
+
+--- InputText restricted to editing a float: while focused, the buffer
+--- parses on every keystroke — a successful tonumber() returns the parsed
+--- value with changed = true; an unparseable intermediate state ("", "-",
+--- ".", ...) returns the last good value unchanged (changed = false) until
+--- it parses again. Enter commits (parsing, or reverting if it doesn't
+--- parse); Escape always reverts. If `step` is given (and nonzero), small
+--- "-"/"+" buttons nudge the value by `step` directly. No selection, no
+--- format string, no ctrl-drag stepFast — deliberate deviations from ImGui
+--- documented in docs/imgui.md. Equivalent of ImGui::InputFloat().
+function imlove.InputFloat(label, value, step)
+  return numericInput("InputFloat", label, value, step, nil)
+end
+
+--- The integer counterpart of InputFloat(): typed values FLOOR to an integer
+--- (so "3.7" commits as 3) rather than rounding — a documented deviation
+--- from plain truncation-free InputInt semantics, chosen so partial input
+--- like "-" or "3." never round-trips into visible jitter. Equivalent of
+--- ImGui::InputInt().
+function imlove.InputInt(label, value, step)
+  return numericInput("InputInt", label, value, step, math.floor)
+end
+
+--------------------------------------------------------------------------------
+-- Style: PushStyleColor/PushStyleVar temporarily override an entry in the
+-- module-local `style` table (declared at the very top of this file) for
+-- everything drawn until the matching pop — both are a single GLOBAL LIFO
+-- stack each (like ctx.fontStack, unlike the per-window ctx.idStack), since a
+-- themed span is free to cross window boundaries within a frame. Both must
+-- be balanced by Render() time (see its balance checks) rather than by
+-- End(), for the same reason. PushFont works the same way for ctx.font.
+--------------------------------------------------------------------------------
+
+-- style.colors' field names, exactly as PushStyleColor()/GetStyle().colors
+-- use them (see docs/imgui.md for the ImGuiCol_* mapping) — built from the
+-- table itself so the valid-name set can never drift out of sync with it.
+local STYLE_COLOR_NAMES = {}
+for name in pairs(style.colors) do STYLE_COLOR_NAMES[name] = true end
+
+-- Style vars: name -> the shape PushStyleVar()/PopStyleVar() enforce for it,
+-- matching how each is already stored in `style` above. Pair-shaped vars are
+-- {x, y} tables, not separate x/y arguments.
+local STYLE_VAR_SHAPES = {
+  windowPadding = "number",
+  framePadding  = "pair",
+  itemSpacing   = "pair",
+  innerSpacing  = "number",
+  indent        = "number",
+  rounding      = "number",
+  sliderWidth   = "number",
+  grabWidth     = "number",
+}
+
+local function checkStyleVar(fnName, name, value)
+  local shape = STYLE_VAR_SHAPES[name]
+  if not shape then
+    error("imlove." .. fnName .. "(): unknown style var '" .. tostring(name)
+      .. "'", 3)
+  end
+  if shape == "number" then
+    if type(value) ~= "number" then
+      error("imlove." .. fnName .. "(): '" .. name .. "' expects a number, got "
+        .. type(value), 3)
+    end
+  elseif type(value) ~= "table" or type(value[1]) ~= "number"
+      or type(value[2]) ~= "number" then
+    error("imlove." .. fnName .. "(): '" .. name .. "' expects a {x, y} table",
+      3)
+  end
+end
+
+--- Push a color override onto a global stack: every widget drawn from now
+--- until the matching PopStyleColor() uses `color` ({r, g, b, a}) in place
+--- of GetStyle().colors[name]. name is one of that table's field names
+--- (e.g. "button", "text", "frameBg") — an unknown name errors immediately,
+--- the same typo protection as Begin()'s window flags. Draw commands
+--- capture a REFERENCE to whatever color table is live at the time a widget
+--- is drawn, so a push/pop wrapped tightly around one widget never leaks
+--- into the next, even though colors are restored by mutating the same
+--- `style.colors[name]` slot rather than by swapping in a new table.
+--- Equivalent of ImGui::PushStyleColor(), with a string name instead of an
+--- ImGuiCol enum.
+function imlove.PushStyleColor(name, color)
+  if not STYLE_COLOR_NAMES[name] then
+    error("imlove.PushStyleColor(): unknown color '" .. tostring(name)
+      .. "'", 2)
+  end
+  ctx.colorStack[#ctx.colorStack + 1] = { name = name, old = style.colors[name] }
+  style.colors[name] = color
+end
+
+--- Pop `count` (default 1) color overrides pushed by PushStyleColor(), each
+--- restoring the color it shadowed. Equivalent of ImGui::PopStyleColor().
+function imlove.PopStyleColor(count)
+  count = count or 1
+  for _ = 1, count do
+    local n = #ctx.colorStack
+    if n == 0 then
+      error("imlove.PopStyleColor(): no matching imlove.PushStyleColor()", 2)
+    end
+    local entry = ctx.colorStack[n]
+    ctx.colorStack[n] = nil
+    style.colors[entry.name] = entry.old
+  end
+end
+
+--- Push a style var override onto a global stack, same push/pop pattern as
+--- PushStyleColor() but for GetStyle()'s scalar/pair fields (rounding,
+--- framePadding, itemSpacing, innerSpacing, indent, sliderWidth, grabWidth,
+--- windowPadding). value's shape must match the field: a plain number for
+--- the scalar ones, or a {x, y} table for framePadding/itemSpacing — an
+--- unknown name, or a value of the wrong shape, errors immediately.
+--- Equivalent of ImGui::PushStyleVar(), with a string name instead of an
+--- ImGuiStyleVar enum.
+function imlove.PushStyleVar(name, value)
+  checkStyleVar("PushStyleVar", name, value)
+  ctx.varStack[#ctx.varStack + 1] = { name = name, old = style[name] }
+  style[name] = value
+end
+
+--- Pop `count` (default 1) style vars pushed by PushStyleVar(), each
+--- restoring the value it shadowed. Equivalent of ImGui::PopStyleVar().
+function imlove.PopStyleVar(count)
+  count = count or 1
+  for _ = 1, count do
+    local n = #ctx.varStack
+    if n == 0 then
+      error("imlove.PopStyleVar(): no matching imlove.PushStyleVar()", 2)
+    end
+    local entry = ctx.varStack[n]
+    ctx.varStack[n] = nil
+    style[entry.name] = entry.old
+  end
+end
+
+--- Returns the LIVE style table — the exact same one every widget already
+--- reads from, with the scalar fields (windowPadding, framePadding, ...) at
+--- the top level and a `colors` sub-table underneath. Mutate it directly at
+--- your own risk: a change takes effect immediately, persists until you
+--- undo it yourself, and (unlike PushStyleColor()/PushStyleVar()) is never
+--- caught by Render()'s balance check if you forget to. PushStyleColor()/
+--- PushStyleVar() are the frame-safe way to make a temporary change; reach
+--- for GetStyle() only to set up a theme once, e.g. right after
+--- `require "imlove"`. Has no direct ImGui equivalent (ImGui's
+--- ImGui::GetStyle() returns a struct meant for exactly this kind of
+--- one-time setup too; imlove just has no separate style-editor demo).
+function imlove.GetStyle()
+  return style
+end
+
+--- Push a font (any LÖVE Font object — love.graphics.newFont(...), with or
+--- without a path/size) onto a stack: every textSize() measurement,
+--- frameHeight() calculation, and widget drawn from now until the matching
+--- PopFont() uses it instead of the library's own default font. Must be
+--- balanced by Render() time. Errors immediately if `font` isn't a
+--- Font-shaped object (has getWidth/getHeight). Equivalent of
+--- ImGui::PushFont().
+function imlove.PushFont(font)
+  -- Validated up front like every sibling Push* added this release: without
+  -- this, PushFont(nil) (or any non-Font value) doesn't fail here — it fails
+  -- frames later, deep inside textSize() or Render(), with a raw "attempt to
+  -- index a nil value" that gives no hint PushFont() was the actual mistake.
+  -- Duck-typed (getWidth/getHeight) rather than checking for LÖVE's Font
+  -- userdata type specifically, so hand-built stub fonts (see tests) work
+  -- too — every real call site only ever calls font:getWidth()/getHeight(),
+  -- never anything more specific.
+  if not (font and (type(font) == "userdata" or type(font) == "table")
+      and font.getWidth and font.getHeight) then
+    error("imlove.PushFont(): expected a LÖVE Font object", 2)
+  end
+  ctx.fontStack[#ctx.fontStack + 1] = ctx.font
+  ctx.font = font
+end
+
+--- Pop the font pushed by PushFont(), restoring whatever font was active
+--- before it (the library's own default font, or an outer PushFont()).
+--- Equivalent of ImGui::PopFont().
+function imlove.PopFont()
+  local n = #ctx.fontStack
+  if n == 0 then
+    error("imlove.PopFont(): no matching imlove.PushFont()", 2)
+  end
+  ctx.font = ctx.fontStack[n]
+  ctx.fontStack[n] = nil
+end
+
+-- Shared by ColorEdit3()/ColorEdit4(): a color-swatch button (click opens a
+-- popup with one SliderFloat 0..1 per channel plus a live preview swatch)
+-- plus a label, reusing the exact same press-to-toggle popup pattern as
+-- Combo(). n is 3 or 4 (RGB vs RGBA). Returns a NEW table when changed —
+-- never mutates the one passed in, the "no mutation" convention every
+-- table-valued widget in this library follows — and the SAME reference
+-- back, unchanged, otherwise (mirrors SliderFloat's `value, changed`
+-- contract).
+local function colorEdit(fnName, label, color, n)
+  local win = requireWindow(fnName)
+  if win.skipItems then return color, false end
+  local display, idText = splitLabel(label)
+  local id = makeId(idText)
+  local fpy = style.framePadding[2]
+  local h = frameHeight()
+  local swatchW = h * 2
+  local tw = ctx.font:getWidth(display)
+  local totalW = swatchW + (tw > 0 and style.innerSpacing + tw or 0)
+  local x, y = itemAdd(win, totalW, h)
+  local hovered, held = behavior(win, id, x, y, swatchW, h)
+  recordItem(win, hovered, held, false)
+
+  local popId = popupId(idText)
+  local isOpen = popupIsOpen(popId)
+  if hovered and ctx.mouse.pressed then
+    -- Press-time toggle, same reasoning as Combo()'s: this box is the
+    -- popup's ownerRect, so a press here while open reaches this toggle
+    -- instead of being treated as an outside/dismiss click.
+    if isOpen then
+      closePopup(popId)
+    else
+      openPopupById(popId, "popup", { x = x, y = y, w = swatchW, h = h },
+        x, y + h + 2)
+    end
+    isOpen = not isOpen
+  end
+
+  pushRect(win, "line", x, y, swatchW, h, style.colors.border, style.rounding)
+  pushRect(win, "fill", x + 1, y + 1, swatchW - 2, h - 2, color, style.rounding)
+  if tw > 0 then
+    pushText(win, display, x + swatchW + style.innerSpacing, y + fpy,
+      style.colors.text)
+  end
+
+  local edited = { color[1], color[2], color[3] }
+  if n == 4 then edited[4] = color[4] end
+
+  local changed = false
+  if isOpen then
+    beginPopupContent(popId, idText, "popup", nil)
+    local popWin = ctx.currentWindow
+    local channelLabels = { "R", "G", "B", "A" }
+    for i = 1, n do
+      local v, ch = imlove.SliderFloat(channelLabels[i], edited[i], 0, 1)
+      edited[i] = clamp(v, 0, 1)
+      if ch then changed = true end
+    end
+    imlove.Separator()
+    local pw, ph = style.sliderWidth, frameHeight() * 1.5
+    local px, py = itemAddPassive(popWin, pw, ph)
+    pushRect(popWin, "line", px, py, pw, ph, style.colors.border,
+      style.rounding)
+    pushRect(popWin, "fill", px + 1, py + 1, pw - 2, ph - 2, edited,
+      style.rounding)
+    endPopupContent(popWin)
+  end
+
+  if changed then
+    local result = { edited[1], edited[2], edited[3] }
+    -- ColorEdit3 never shows or edits a 4th channel, but a 4-element table
+    -- passed into it keeps whatever alpha it already had (nil if it never
+    -- had one) — "leaves alpha alone" means passed through, not dropped.
+    result[4] = (n == 4) and edited[4] or color[4]
+    return result, true
+  end
+  return color, false
+end
+
+--- A 3-channel (r, g, b) version of ColorEdit4() — same swatch+popup, but
+--- the popup shows only R/G/B sliders; a 4th channel on the table passed
+--- in, if any, always passes through untouched. Equivalent of
+--- ImGui::ColorEdit3().
+function imlove.ColorEdit3(label, color)
+  return colorEdit("ColorEdit3", label, color, 3)
+end
+
+--- A color-swatch button + label; click it to open a popup with a
+--- SliderFloat (0..1) per channel — R, G, B, A — and a live preview swatch.
+--- `color` is {r, g, b, a}; returns a NEW table when changed (never mutates
+--- the one passed in) and the SAME reference back, unchanged, otherwise,
+--- plus a changed flag, same convention as every other value widget:
+---
+---   tint, changed = imlove.ColorEdit4("Tint", tint)
+---
+--- DEVIATION from ImGui: no HSV wheel, no hex input, no right-click
+--- "copy as..." context menu — just the four sliders, in keeping with this
+--- library's modest widget set. Equivalent of ImGui::ColorEdit4().
+function imlove.ColorEdit4(label, color)
+  return colorEdit("ColorEdit4", label, color, 4)
 end
 
 --------------------------------------------------------------------------------
@@ -821,6 +3701,31 @@ function imlove.GetItemRectMax()
   return win.prevItem.x + win.prevItem.w, win.prevItem.y + win.prevItem.h
 end
 
+--- Was the most recent item hovered by the mouse this frame? Works for any
+--- item, including non-interactive ones like Text() (computed from its
+--- rectangle rather than a stored hot-state). Equivalent of
+--- ImGui::IsItemHovered().
+function imlove.IsItemHovered()
+  local win = requireWindow("IsItemHovered")
+  return win.prevItem.hovered == true
+end
+
+--- Is the most recent item currently held down by the mouse? Always false
+--- for non-interactive items. Equivalent of ImGui::IsItemActive().
+function imlove.IsItemActive()
+  local win = requireWindow("IsItemActive")
+  return win.prevItem.active == true
+end
+
+--- Was the most recent item clicked this frame — its own notion of a
+--- completed click, e.g. Button()'s release-over-it or TreeNode()'s toggle.
+--- Always false for non-interactive items. Equivalent of
+--- ImGui::IsItemClicked().
+function imlove.IsItemClicked()
+  local win = requireWindow("IsItemClicked")
+  return win.prevItem.clicked == true
+end
+
 --------------------------------------------------------------------------------
 -- LÖVE input forwarding. Call these from the matching love.* callbacks.
 -- Each returns true when the UI consumed the event, i.e. when your game
@@ -833,6 +3738,11 @@ end
 --------------------------------------------------------------------------------
 
 local function mouseOverUI(x, y)
+  -- Any open popup (including a modal) captures every press/hover on the
+  -- screen, whether or not it lands inside the popup itself: an outside
+  -- press dismisses/is blocked rather than reaching the game (see
+  -- NewFrame()'s dismiss-scan and popupAt()'s `blocked` return).
+  if #ctx.popupOrder > 0 then return true end
   return windowAt(x, y) ~= nil
     or ctx.activeId ~= nil or ctx.dragWindow ~= nil
 end
@@ -843,6 +3753,8 @@ function imlove.mousepressed(x, y, button)
   if button == 1 then
     ctx.pressLatch = true
     ctx.mouse.down = true
+  elseif button == 2 then
+    ctx.rightPressLatch = true
   end
   imlove.io.WantCaptureMouse = captured
   return captured
@@ -859,23 +3771,64 @@ function imlove.mousereleased(x, y, button)
   return captured
 end
 
---- Forward from love.wheelmoved. v1 windows auto-size instead of scrolling,
---- so the wheel does nothing yet — but the event still reports as consumed
---- over a window, so the game doesn't zoom/scroll underneath the UI.
+--- Forward from love.wheelmoved. Latches dy to be applied to whatever
+--- window (or BeginChild() region) is under the mouse at the next
+--- NewFrame() — same latch-then-apply pattern as mouse press/release, so a
+--- wheelmoved() that arrives between frames is never dropped. Still reports
+--- consumed whenever the mouse is over any window, exactly as in v1, so the
+--- game doesn't zoom/scroll underneath the UI even for windows or
+--- "NoScrollbar" windows that have nothing to scroll.
 function imlove.wheelmoved(dx, dy)
-  return windowAt(ctx.mouse.x, ctx.mouse.y) ~= nil
+  ctx.wheelLatch = ctx.wheelLatch + dy
+  return #ctx.popupOrder > 0 or windowAt(ctx.mouse.x, ctx.mouse.y) ~= nil
 end
 
---- Forward from love.keypressed. v1 has no keyboard widgets, so this never
---- consumes; it exists so integrations are already correct when text input
---- arrives in a future version.
-function imlove.keypressed(key)
-  return imlove.io.WantCaptureKeyboard
+-- Named keys the text-input editor (see InputText() and friends, and
+-- ctrl-clicked sliders/drags) recognizes and queues. Anything else — F-keys,
+-- Tab, arrow-up/down, ... — is left unqueued even while a field has focus,
+-- so it still reaches your game through whatever else you wire.
+local RECOGNIZED_KEYS = {
+  backspace = "backspace", delete = "delete", left = "left", right = "right",
+  home = "home", ["end"] = "end", ["return"] = "enter", kpenter = "enter",
+  escape = "escape",
+}
+
+--- Forward from love.keypressed. LÖVE actually calls
+--- love.keypressed(key, scancode, isrepeat); the extra arguments are
+--- accepted and ignored. While any InputText/InputFloat/InputInt (or a
+--- ctrl-clicked slider/drag) has keyboard focus (io.WantCaptureKeyboard),
+--- this queues the key for the next NewFrame() to apply — see
+--- processEditEvents() — and returns true (consumed), REGARDLESS of whether
+--- the key is one the editor recognizes: that's what lets, say, "space" stop
+--- pausing your game while the user is typing (check the return value, or
+--- io.WantCaptureKeyboard, before acting on a key). Recognizes Backspace,
+--- Delete, Left, Right, Home, End, Return/KPEnter (commit), Escape (revert),
+--- and Ctrl+C/Ctrl+V (copy the whole field / paste at the cursor — checked
+--- via love.keyboard.isDown("lctrl", "rctrl") at the moment the key lands).
+--- Returns false whenever no field has focus, exactly as in v1-v1.3.
+function imlove.keypressed(key, scancode, isrepeat)
+  if not imlove.io.WantCaptureKeyboard then return false end
+  local mapped = RECOGNIZED_KEYS[key]
+  if mapped then
+    ctx.inputEvents[#ctx.inputEvents + 1] = { kind = "key", key = mapped }
+  elseif (key == "v" or key == "c") and ctrlHeld() then
+    ctx.inputEvents[#ctx.inputEvents + 1] =
+      { kind = "key", key = key == "v" and "paste" or "copy" }
+  end
+  return true
 end
 
---- Forward from love.textinput. Same story as keypressed.
+--- Forward from love.textinput. Queues the UTF-8 text chunk for the next
+--- NewFrame() to insert at the focused field's cursor, in order with any
+--- queued key events (see imlove.keypressed()) — the same latch-then-apply
+--- pattern every other input event in imlove uses. Returns true whenever any
+--- field has focus (io.WantCaptureKeyboard), false otherwise — matching
+--- keypressed()'s "always true while focused" rule, not gated on whether
+--- `text` itself is one this editor would do anything with.
 function imlove.textinput(text)
-  return imlove.io.WantCaptureKeyboard
+  if not imlove.io.WantCaptureKeyboard then return false end
+  ctx.inputEvents[#ctx.inputEvents + 1] = { kind = "text", text = text }
+  return true
 end
 
 return imlove

@@ -53,6 +53,10 @@ function love.mousepressed(x, y, button)
     if DebugOverlay.mousepressed(x, y, button) then return end
 end
 
+function love.textinput(text)
+    if DebugOverlay.textinput(text) then return end
+end
+
 function love.mousereleased(x, y, button)
     if DebugOverlay.mousereleased(x, y, button) then return end
 end

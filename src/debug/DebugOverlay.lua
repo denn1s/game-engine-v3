@@ -140,6 +140,10 @@ function DebugOverlay.keypressed(key)
     return imlove.keypressed(key)
 end
 
+function DebugOverlay.textinput(text)
+    return imlove.textinput(text)
+end
+
 function DebugOverlay.mousepressed(x, y, button)
     return imlove.mousepressed(x, y, button)
 end
