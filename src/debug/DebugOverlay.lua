@@ -29,6 +29,21 @@ local FRAME_HISTORY = 120 -- two seconds' worth at 60fps
 local frameTimes = {} -- rolling window of dt, in milliseconds
 local displayedFPS = 0 -- frozen while paused, like everything else
 
+-- The overlay's font: LÖVE's default (Vera Sans) for text, with Noto
+-- Sans Symbols 2 chained BEHIND it via LÖVE's font fallbacks — glyphs
+-- Vera lacks (the transport bar's ▶ ⏸ ⏭) fall through and resolve
+-- there instead of rendering as tofu boxes. Lazy: fonts want a window,
+-- so this runs on the first frame, not at require time.
+local fontInstalled = false
+local function installFont()
+    if fontInstalled then return end
+    fontInstalled = true
+    local ui = love.graphics.newFont(13)
+    ui:setFallbacks(love.graphics.newFont(
+        "lib/fonts/NotoSansSymbols2-Regular.ttf", 13))
+    imlove.io.FontDefault = ui
+end
+
 -- One Combo picks WHICH component to edit, and only that one is drawn.
 -- With a tree per component the editor grows with the entity; with a
 -- Combo it stays one dropdown tall no matter how many components the
@@ -123,9 +138,8 @@ end
 
 -- The transport bar: Unity-style play / pause / step in a tiny strip,
 -- top-center. NoTitleBar also removes the drag region, so the bar can't
--- be moved — it's furniture, not a document window. The "icons" are
--- ASCII on purpose: imlove's font is LÖVE's default (Vera Sans), which
--- has no play/pause glyphs — real ▶/⏸ would render as tofu boxes.
+-- be moved — it's furniture, not a document window. The glyphs render
+-- thanks to the Noto Symbols fallback font (see installFont).
 local LIT = { 0.16, 0.53, 0.90, 1.00 } -- buttonActive blue: reads as "on"
 local DIM = { 0.50, 0.50, 0.50, 1.00 } -- textDisabled gray
 
@@ -144,15 +158,15 @@ end
 local function buildTransportBar()
     imlove.SetNextWindowPos(love.graphics.getWidth() / 2 - 62, 10, "once")
     if imlove.Begin("transport", nil, { "NoTitleBar", "AlwaysAutoResize" }) then
-        if transportButton(">", not paused, true) then -- play = unpause
+        if transportButton("▶", not paused, true) then -- play = unpause
             paused = false
         end
         imlove.SameLine()
-        if transportButton("||", paused, true) then
+        if transportButton("⏸", paused, true) then
             paused = true
         end
         imlove.SameLine()
-        if transportButton(">|", false, paused) then -- step: only paused
+        if transportButton("⏭", false, paused) then -- step: only paused
             stepOnce = true
         end
     end
@@ -206,6 +220,7 @@ end
 -- Call at the top of love.update, BEFORE the game updates: the UI reads
 -- and edits the state the previous frame produced.
 function DebugOverlay.beginFrame(scene)
+    installFont()
     imlove.NewFrame()
 
     if scene ~= inspectedScene then -- entity numbers reset with the registry
