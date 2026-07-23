@@ -8,10 +8,15 @@ local GameOverSystem = require("src.systems.GameOverSystem")
 local GameOverRenderSystem = require("src.systems.GameOverRenderSystem")
 
 return function(payload)
+    -- the debug scene switcher can jump here directly, with no payload.
+    -- A scene you can't enter directly is a scene you can't test
+    -- directly, so factories default their payloads instead of assuming.
+    payload = payload or {}
+
     local scene = Scene.new("gameover")
 
     scene.registry:spawn({
-        finalScore = { left = payload.left, right = payload.right },
+        finalScore = { left = payload.left or 0, right = payload.right or 0 },
     })
 
     scene:addSystem(GameOverSystem)

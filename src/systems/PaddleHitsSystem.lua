@@ -3,7 +3,7 @@
 
 local SPEEDUP = 1.06
 
-local PaddleHitsSystem = {}
+local PaddleHitsSystem = { name = "paddleHits" }
 
 local function aabb(ax, ay, aw, ah, bx, by, bw, bh)
     return ax < bx + bw and bx < ax + aw

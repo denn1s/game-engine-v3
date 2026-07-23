@@ -4,7 +4,7 @@
 -- spawned. Key events are broadcasts: we read them, never destroy them
 -- (the Game sweeps them at the end of the frame).
 
-local MenuSystem = {}
+local MenuSystem = { name = "menu" }
 
 function MenuSystem.update(scene, dt)
     for _, event in scene.registry:each("keyPressed") do

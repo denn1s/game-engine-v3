@@ -31,6 +31,11 @@ function Scene.new(name)
         name = name,
         registry = Registry.new(),
         systems = {}, -- ordered list; order matters!
+        -- debug tools can switch a system off ([system] = true). It
+        -- lives on the SCENE, not on the system table: system modules
+        -- are shared by every scene instance (require caches them) and
+        -- must stay stateless — and a fresh scene starts with all on.
+        disabledSystems = {},
     }, Scene)
 end
 
@@ -57,9 +62,11 @@ function Scene:unload()
     end
 end
 
+-- update and draw honor disabledSystems; setup and unload never do —
+-- they manage resources, and a disabled system still owns what it made.
 function Scene:update(dt)
     for _, system in ipairs(self.systems) do
-        if system.update then
+        if system.update and not self.disabledSystems[system] then
             system.update(self, dt)
         end
     end
@@ -67,7 +74,7 @@ end
 
 function Scene:draw()
     for _, system in ipairs(self.systems) do
-        if system.draw then
+        if system.draw and not self.disabledSystems[system] then
             system.draw(self)
         end
     end

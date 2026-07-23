@@ -1,7 +1,7 @@
 -- Integrates velocity into position, for ANY entity that has both.
 -- Paddles, balls, and everything we add later move through this one system.
 
-local MovementSystem = {}
+local MovementSystem = { name = "movement" }
 
 function MovementSystem.update(scene, dt)
     local registry = scene.registry

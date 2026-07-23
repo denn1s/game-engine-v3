@@ -5,7 +5,7 @@
 -- it runs FIRST in the scene — the BallSpawnSystem right after it
 -- consumes the serveRequest on this very frame.
 
-local DebugSystem = {}
+local DebugSystem = { name = "debug" }
 
 function DebugSystem.update(scene, dt)
     for _, event in scene.registry:each("keyPressed") do

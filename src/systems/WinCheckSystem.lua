@@ -5,7 +5,7 @@
 -- (leave the scene) is a different responsibility, so it's a different
 -- system. Runs right after ScoringSystem.
 
-local WinCheckSystem = {}
+local WinCheckSystem = { name = "winCheck" }
 
 function WinCheckSystem.update(scene, dt)
     local registry = scene.registry

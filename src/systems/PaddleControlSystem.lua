@@ -3,7 +3,7 @@
 
 local MARGIN = 30 -- distance from paddles to the side walls
 
-local PaddleControlSystem = {}
+local PaddleControlSystem = { name = "paddleControl" }
 
 -- This system owns the paddles, so it creates them.
 function PaddleControlSystem.setup(scene)

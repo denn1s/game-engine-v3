@@ -1,5 +1,6 @@
--- The debug overlay: an entity inspector with pause and frame-stepping,
--- built on imlove (lib/imlove.lua — vendored; see the lesson README).
+-- The debug overlay: an entity inspector with pause, frame-stepping, a
+-- scene switcher, and live system on/off toggles, built on imlove
+-- (lib/imlove.lua — vendored; see the lesson README).
 --
 -- This is ENGINE tooling, not game code. It is not a system and it does
 -- not live in any scene: it sits next to the Game, inspecting whatever
@@ -11,6 +12,7 @@
 --   F10  advance exactly one frame while paused
 
 local imlove = require("lib.imlove")
+local Game = require("src.Game") -- for the scene switcher only
 
 local DebugOverlay = {}
 
@@ -19,33 +21,41 @@ local paused = false
 local stepOnce = false
 
 local selectedEntity = nil
+local inspectedComponent = 1 -- Combo index into the entity's components
 local inspectedScene = nil -- to drop the selection when the scene changes
 
 local FRAME_HISTORY = 120 -- two seconds' worth at 60fps
 local frameTimes = {} -- rolling window of dt, in milliseconds
 
+-- One Combo picks WHICH component to edit, and only that one is drawn.
+-- With a tree per component the editor grows with the entity; with a
+-- Combo it stays one dropdown tall no matter how many components the
+-- dating sim will pile on.
 local function componentEditor(registry, entity)
-    for _, name in ipairs(registry:componentsOf(entity)) do
-        if imlove.TreeNode(name) then
-            local data = registry:get(entity, name)
+    local names = registry:componentsOf(entity)
+    if inspectedComponent > #names then
+        inspectedComponent = 1 -- the entity changed shape under us
+    end
+    inspectedComponent = imlove.Combo("component", inspectedComponent, names)
 
-            local keys = {} -- pairs() order is unstable; sort for a calm UI
-            for k in pairs(data) do
-                keys[#keys + 1] = k
-            end
-            table.sort(keys)
+    local name = names[inspectedComponent]
+    if not name then return end
+    local data = registry:get(entity, name)
 
-            for _, k in ipairs(keys) do
-                local v = data[k]
-                if type(v) == "number" then
-                    data[k] = imlove.SliderFloat(k, v, -960, 960)
-                elseif type(v) == "boolean" then
-                    data[k] = imlove.Checkbox(k, v)
-                else
-                    imlove.Text("%s: %s", k, tostring(v))
-                end
-            end
-            imlove.TreePop()
+    local keys = {} -- pairs() order is unstable; sort for a calm UI
+    for k in pairs(data) do
+        keys[#keys + 1] = k
+    end
+    table.sort(keys)
+
+    for _, k in ipairs(keys) do
+        local v = data[k]
+        if type(v) == "number" then
+            data[k] = imlove.SliderFloat(k, v, -960, 960)
+        elseif type(v) == "boolean" then
+            data[k] = imlove.Checkbox(k, v)
+        else
+            imlove.Text("%s: %s", k, tostring(v))
         end
     end
 end
@@ -71,6 +81,32 @@ local function buildUi(scene)
 
         imlove.Separator()
 
+        -- the switcher spawns the SAME switchRequest any system would —
+        -- the tool has no special powers. Pressing the current scene's
+        -- button rebuilds it fresh (factories!), so it doubles as a
+        -- restart button. While paused the request just sits in the
+        -- registry: Game.update is what honors it, on the next step.
+        if imlove.CollapsingHeader("scenes") then
+            for i, name in ipairs(Game.sceneNames()) do
+                if i > 1 then imlove.SameLine() end
+                if imlove.Button(name) then
+                    scene.registry:spawn({ switchRequest = { to = name } })
+                end
+            end
+        end
+
+        -- the checkbox list IS the frame order, top to bottom — and each
+        -- one is a live experiment: switch a system off and watch the
+        -- world keep running without it. The off-flag lives on the scene
+        -- (see Scene.new), so a fresh scene always starts with all on.
+        if imlove.CollapsingHeader("systems") then
+            for _, system in ipairs(scene.systems) do
+                local enabled = imlove.Checkbox(system.name or "(unnamed)",
+                    not scene.disabledSystems[system])
+                scene.disabledSystems[system] = (not enabled) or nil
+            end
+        end
+
         local registry = scene.registry
         if imlove.TreeNode("entities") then
             -- a fixed-height scrolling region: the list must stay usable
@@ -84,6 +120,7 @@ local function buildUi(scene)
                         table.concat(registry:componentsOf(entity), " "))
                     if imlove.Selectable(label, selectedEntity == entity) then
                         selectedEntity = entity
+                        inspectedComponent = 1 -- new entity, new dropdown
                     end
                     imlove.PopID()
                 end
@@ -125,6 +162,7 @@ function DebugOverlay.beginFrame(scene)
     if scene ~= inspectedScene then -- entity numbers reset with the registry
         inspectedScene = scene
         selectedEntity = nil
+        inspectedComponent = 1
     end
 
     if visible then

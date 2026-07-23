@@ -79,4 +79,17 @@ function Game.current()
     return current
 end
 
+-- Every registered scene name, sorted. Game code never needs this — it
+-- always knows where it's going. It exists for TOOLS, same story as
+-- Registry:entities(): the debug scene switcher asks "where could we
+-- go?" without hardcoding a scene list.
+function Game.sceneNames()
+    local names = {}
+    for name in pairs(factories) do
+        names[#names + 1] = name
+    end
+    table.sort(names)
+    return names
+end
+
 return Game

@@ -1,7 +1,7 @@
 -- Draws the results screen from the `finalScore` data the scene factory
 -- spawned out of the switch payload.
 
-local GameOverRenderSystem = {}
+local GameOverRenderSystem = { name = "gameOverRender" }
 
 local bigFont, smallFont
 

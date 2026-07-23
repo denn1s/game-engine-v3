@@ -1,7 +1,7 @@
 -- Keeps entities tagged with a `clamp` component inside the window
 -- (vertically). The paddles use this. Runs AFTER movement.
 
-local ClampSystem = {}
+local ClampSystem = { name = "clamp" }
 
 function ClampSystem.update(scene, dt)
     local registry = scene.registry

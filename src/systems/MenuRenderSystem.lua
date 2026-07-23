@@ -1,6 +1,6 @@
 -- Draws the title screen.
 
-local MenuRenderSystem = {}
+local MenuRenderSystem = { name = "menuRender" }
 
 local titleFont, smallFont
 

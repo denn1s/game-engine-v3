@@ -1,7 +1,7 @@
 -- Draws everything: the court, every entity with position + size, and
 -- the UI. It's the only system with a `draw` instead of an `update`.
 
-local RenderSystem = {}
+local RenderSystem = { name = "render" }
 
 local bigFont, smallFont
 

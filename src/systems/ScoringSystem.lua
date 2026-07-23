@@ -6,7 +6,7 @@
 -- emits a `serveRequest` event-entity; the BallSpawnSystem takes it
 -- from there. Systems talk through data, never through function calls.
 
-local ScoringSystem = {}
+local ScoringSystem = { name = "scoring" }
 
 -- This system owns the match state, so it creates it.
 function ScoringSystem.setup(scene)

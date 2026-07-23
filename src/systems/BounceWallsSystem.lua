@@ -1,7 +1,7 @@
 -- Entities tagged with `bounceWalls` reflect off the top and bottom of
 -- the screen. The ball uses this. Runs AFTER movement.
 
-local BounceWallsSystem = {}
+local BounceWallsSystem = { name = "bounceWalls" }
 
 function BounceWallsSystem.update(scene, dt)
     local registry = scene.registry

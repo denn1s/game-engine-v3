@@ -9,7 +9,7 @@
 local START_SPEED = 280
 local SIZE = 14
 
-local BallSpawnSystem = {}
+local BallSpawnSystem = { name = "ballSpawn" }
 
 function BallSpawnSystem.setup(scene)
     -- ask for the opening serve; update() does the actual spawning
