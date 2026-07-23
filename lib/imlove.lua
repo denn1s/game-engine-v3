@@ -37,7 +37,7 @@ Two classic IMGUI idioms show up throughout, worth knowing:
 MIT License — see LICENSE.
 ------------------------------------------------------------------------------]]
 
-local imlove = { _VERSION = "1.5.0" }
+local imlove = { _VERSION = "1.6.0" }
 
 -- io mirrors Dear ImGui's ImGuiIO flags. After NewFrame() these tell the host
 -- game whether the UI wants the mouse/keyboard this frame, so the game can
@@ -73,6 +73,9 @@ local style = {
   minWindowWidth = 60,
   scrollbarWidth = 10,      -- width of a window/child's scrollbar track
   gripSize       = 14,      -- side length of the resize-grip corner triangle
+  snapZone       = 12,      -- mouse distance from a screen edge that counts
+                            -- as "on it" for window snapping (see
+                            -- SetNextWindowSnap())
 
   colors = {
     text             = { 0.92, 0.92, 0.92, 1.00 },
@@ -129,6 +132,7 @@ local ctx = {
   hoveredWindow = nil, -- front-most window under the mouse (last-frame rects)
   nextWindowPos = nil, -- pending SetNextWindowPos(), consumed by next Begin()
   nextWindowSize = nil, -- pending SetNextWindowSize(), consumed by next Begin()
+  nextWindowSnap = nil, -- pending SetNextWindowSnap(), consumed by next Begin()
 
   idStack   = {},      -- see PushID(); slot 1 is always the window's title
   activeId  = nil,     -- id of the widget being held with the mouse, if any
@@ -206,6 +210,20 @@ end
 
 local function pointIn(px, py, x, y, w, h)
   return px >= x and px < x + w and py >= y and py < y + h
+end
+
+-- Which screen edge's snap zone the given mouse x is inside: "left",
+-- "right", or nil (see the "Window snapping" section below). Measured
+-- against the MOUSE, not the dragged window's own edge — when a wide window
+-- is grabbed by the middle of its title bar, its left edge reaches x=0 long
+-- before the user means "snap this". Lives up here with the small helpers
+-- (not with snapWindow()/unsnapWindow()) because Render()'s snap preview,
+-- defined before that section, needs it too.
+local function snapZoneAt(mx)
+  local sw = love.graphics.getDimensions()
+  if mx <= style.snapZone then return "left" end
+  if mx >= sw - style.snapZone then return "right" end
+  return nil
 end
 
 -- Dear ImGui's "##" convention: everything after "##" is part of the widget's
@@ -967,6 +985,30 @@ function imlove.Render()
     end
   end
 
+  -- Snap preview: while a title-bar drag holds the mouse inside a screen-
+  -- edge zone, a translucent full-height band shows where the window will
+  -- pin on release. Drawn UNDER every window, so the dragged window floats
+  -- above its own preview; costs nothing on any other frame. An already-
+  -- snapped window wiggled inside its own zone gets no preview (it is
+  -- already pinned exactly there), and dragging it toward the OTHER edge
+  -- unsnapped it back in Begin() before this runs — so win.snap == nil is
+  -- exactly "this drag would snap something on release".
+  local dragged = ctx.dragWindow
+  if dragged and not dragged.snap
+      and not (dragged.flags and dragged.flags.AlwaysAutoResize) then
+    local zone = snapZoneAt(ctx.mouse.x)
+    if zone then
+      local sw, sh = g.getDimensions()
+      -- The band previews the window's own width — the width it will keep
+      -- while snapped (minWindowWidth stands in for a never-laid-out one).
+      local w = dragged.w > 0 and dragged.w or style.minWindowWidth
+      local col = style.colors.headerHovered
+      g.setColor(col[1], col[2], col[3], (col[4] or 1) * 0.6)
+      g.rectangle("fill", zone == "left" and 0 or sw - w, 0, w, sh,
+        style.rounding, style.rounding)
+    end
+  end
+
   for i = 1, #ctx.windowOrder do
     local win = ctx.windowOrder[i]
     if win.lastFrame == ctx.frame then playDrawList(win.drawList) end
@@ -996,6 +1038,42 @@ function imlove.Render()
   if ctx.iniDirty and imlove.io.IniFilename then
     imlove.SaveIniSettings()
   end
+end
+
+--------------------------------------------------------------------------------
+-- Window snapping (see SetNextWindowSnap()): a snapped window is pinned to
+-- the left or right screen edge at full screen height. These helpers only do
+-- the state bookkeeping; the per-frame geometry pin lives in Begin(). They
+-- sit up here, above the settings-persistence section, because
+-- applyIniEntryToWindow() below needs them too (snap state persists in the
+-- ini alongside position/size/collapsed). Their companion snapZoneAt() —
+-- the gesture's hit test — lives with the small helpers at the top of the
+-- file instead, because Render()'s snap preview needs it earlier.
+--------------------------------------------------------------------------------
+
+-- Snapping remembers the window's pre-snap sizing (mode and height) so
+-- unsnapping can restore it. Width is deliberately NOT part of that memory:
+-- the width the window had when it snapped is the one dimension a snapped
+-- window keeps as its own, and it carries over in both directions.
+local function snapWindow(win, side)
+  if win.snap == side then return end
+  if not win.snap then
+    win.preSnapSizeMode = win.sizeMode
+    win.preSnapH = win.h
+  end
+  win.snap = side
+  win.collapsed = false -- a snapped window has no collapse arrow
+  ctx.iniDirty = true
+end
+
+local function unsnapWindow(win)
+  if not win.snap then return end
+  win.snap = nil
+  win.sizeMode = win.preSnapSizeMode or win.sizeMode
+  if win.sizeMode == "fixed" then
+    win.h = win.preSnapH or win.h
+  end
+  ctx.iniDirty = true
 end
 
 --------------------------------------------------------------------------------
@@ -1048,6 +1126,8 @@ local function parseIniText(text)
       if not x then w, h = line:match("^Size=([%-%d%.]+),([%-%d%.]+)$") end
       local c
       if not x and not w then c = line:match("^Collapsed=(%d)$") end
+      local s
+      if not x and not w and not c then s = line:match("^Snap=(%l+)$") end
       if x then
         current.x, current.y = tonumber(x), tonumber(y)
       elseif w then
@@ -1055,6 +1135,8 @@ local function parseIniText(text)
         current.sized = true
       elseif c then
         current.collapsed = c ~= "0"
+      elseif s == "left" or s == "right" then
+        current.snap = s
       end
     end
   end
@@ -1075,7 +1157,21 @@ local function serializeIniText()
     lines[#lines + 1] = "[Window][" .. win.title .. "]"
     lines[#lines + 1] = string.format("Pos=%d,%d",
       math.floor(win.x + 0.5), math.floor(win.y + 0.5))
-    if win.sizeMode == "fixed" then
+    if win.snap then
+      -- A snapped window's live height is just "the screen height right
+      -- now", so the Size= line pairs its width (the one dimension it
+      -- keeps as its own) with its PRE-snap height — unsnapping after a
+      -- restart then still restores it. A window that was auto-fit before
+      -- snapping writes no Size= line at all, mirroring live behavior:
+      -- its width re-auto-fits for one frame on reload and pins from
+      -- frame two (the same settle a brand-new snapped window does).
+      if win.preSnapSizeMode == "fixed" then
+        lines[#lines + 1] = string.format("Size=%d,%d",
+          math.floor(win.w + 0.5),
+          math.floor((win.preSnapH or win.h) + 0.5))
+      end
+      lines[#lines + 1] = "Snap=" .. win.snap
+    elseif win.sizeMode == "fixed" then
       lines[#lines + 1] = string.format("Size=%d,%d",
         math.floor(win.w + 0.5), math.floor(win.h + 0.5))
     end
@@ -1103,6 +1199,18 @@ local function applyIniEntryToWindow(win)
     win.w, win.h = entry.w, entry.h
     win.sizeMode = "fixed"
     win.sizePlaced = true
+  end
+  -- Snap comes LAST, after the entry's own pos/size above, so the pre-snap
+  -- sizing snapWindow() memorizes (for a later unsnap) is the entry's — a
+  -- Size= line saved for a snapped window IS its pre-snap size, see
+  -- serializeIniText(). Cleared first (plain state, no size restoration:
+  -- the entry's Pos=/Size= are the truth) so re-applying an un-snapped
+  -- entry to a live snapped window doesn't leave it pinned.
+  win.snap = nil
+  if entry.snap then
+    snapWindow(win, entry.snap)
+    win.snapPlaced = true -- beats a later "once" SetNextWindowSnap(), same
+                          -- precedence as win.placed/win.sizePlaced above
   end
 end
 
@@ -1325,6 +1433,28 @@ function imlove.Begin(title, open, flags)
     ctx.nextWindowSize = nil
   end
 
+  local pendingSnap = ctx.nextWindowSnap
+  if pendingSnap then
+    if win.flags.AlwaysAutoResize then
+      -- Explicitly ignored, exactly like SetNextWindowSize() above: the
+      -- flag says "always fit content", and a full-height edge pin is the
+      -- opposite claim.
+    elseif pendingSnap.cond ~= "once" or not win.snapPlaced then
+      if pendingSnap.side then
+        snapWindow(win, pendingSnap.side)
+      else
+        unsnapWindow(win)
+      end
+      win.snapPlaced = true
+    end
+    ctx.nextWindowSnap = nil
+  end
+  if win.flags.AlwaysAutoResize and win.snap then
+    -- The flag flipped on while snapped (it wins, per the comment above):
+    -- come free rather than letting the pin fight End()'s auto-fit.
+    unsnapWindow(win)
+  end
+
   win.lastFrame = ctx.frame
 
   local fpx, fpy = style.framePadding[1], style.framePadding[2]
@@ -1367,18 +1497,55 @@ function imlove.Begin(title, open, flags)
   if ctx.dragWindow == win then
     win.x = ctx.mouse.x - win.dragOffsetX
     win.y = ctx.mouse.y - win.dragOffsetY
+    if win.snap and snapZoneAt(ctx.mouse.x) ~= win.snap then
+      -- The drag pulled the mouse out of this window's edge zone: the
+      -- window comes free immediately (restoring its pre-snap height) and
+      -- follows the mouse from here — no release needed. While the mouse
+      -- stays inside the zone, the pin below re-asserts the geometry and
+      -- the window doesn't budge.
+      unsnapWindow(win)
+    end
     if ctx.mouse.released then
       -- The title-bar drag ends this frame: settle here instead of
       -- waiting for NewFrame()'s idle-frame safety net (see
       -- releaseIfActive()'s comment), and persist the new position.
       ctx.dragWindow = nil
+      -- Released with the mouse inside a screen-edge zone: snap there.
+      -- This is the ONLY drag moment that snaps — merely passing through
+      -- the zone mid-drag does nothing. (AlwaysAutoResize windows never
+      -- snap — same reasoning as the pendingSnap block above.)
+      local zone = snapZoneAt(ctx.mouse.x)
+      if zone and not flagSet.AlwaysAutoResize then
+        snapWindow(win, zone)
+      end
       ctx.iniDirty = true
     end
   end
 
+  -- The snap pin itself: a snapped window sits at its screen edge, y = 0,
+  -- full screen height — re-derived every frame, so an OS window resize is
+  -- tracked for free. Only its width (the width it had when it snapped) is
+  -- its own. A brand-new window that has never been laid out (w == 0) runs
+  -- its first frame in auto-fit to discover a width first — the same
+  -- one-frame lag the rest of the library leans on — and pins from its
+  -- second frame on.
+  if win.snap then
+    local sw, sh = love.graphics.getDimensions()
+    if win.w > 0 then
+      win.h = math.max(sh, minWinH)
+      win.sizeMode = "fixed"
+      win.sizePlaced = true
+    end
+    win.x = win.snap == "left" and 0 or sw - win.w
+    win.y = 0
+  end
+
   -- Same idea for an in-progress resize (dragging the corner grip): apply
   -- it before drawing so the frame the drag starts already reflects it.
+  -- A snapped window has no grip: its height is the screen's and its width
+  -- is frozen at what it was when it snapped.
   local resizable = not flagSet.NoResize and not flagSet.AlwaysAutoResize
+    and not win.snap
   if resizable then
     local gs = style.gripSize
     local gx = win.x + win.w - gs
@@ -1423,7 +1590,9 @@ function imlove.Begin(title, open, flags)
       style.rounding)
 
     -- Collapse arrow: a regular button-behavior region in the title bar.
-    local collapsible = not flagSet.NoCollapse
+    -- A snapped window can't collapse either — a full-height edge panel
+    -- shrinking to a floating title bar would abandon its pin.
+    local collapsible = not flagSet.NoCollapse and not win.snap
     if collapsible then
       local _, _, arrowClicked = behavior(win, makeId("#COLLAPSE"),
         win.x, win.y, ah, ah)
@@ -1606,6 +1775,7 @@ function imlove.End()
     -- the scrollbar's bottom permanently dead under a resizable window.
     local trackH = win.visibleH
     local resizable = not flagSet.NoResize and not flagSet.AlwaysAutoResize
+      and not win.snap
     if resizable then trackH = math.max(trackH - style.gripSize, 0) end
     pushScrollbar(win, makeId("#SCROLLBAR"),
       win.x, win.y + win.titleBarH, win.w, trackH, win)
@@ -1637,6 +1807,35 @@ function imlove.SetNextWindowSize(w, h, cond)
   ctx.nextWindowSize = { w = w, h = h, cond = cond or "always" }
 end
 
+--- Snap the next Begin()'s window to a screen edge: side is "left" or
+--- "right" — or nil, releasing a previous snap. A snapped window is pinned
+--- to that edge at the full screen height (re-derived every frame, so it
+--- tracks OS window resizes); only its width — the width it had when it
+--- snapped — stays its own. Its collapse arrow and resize grip disappear,
+--- but the title bar still drags: pulling the mouse out of the edge zone
+--- unsnaps the window (restoring its pre-snap height) and it follows the
+--- drag from there. Users can also snap any window themselves by dragging
+--- its title bar until the mouse is within GetStyle().snapZone pixels of a
+--- screen edge and releasing.
+---
+--- cond is "always" (default: re-asserted every frame — a dragged-free
+--- window springs back on release; combine with the "NoMove" flag for a
+--- truly static side panel) or "once" (seed the window snapped the first
+--- time it is ever created; drag-to-unsnap is for keeps from then on).
+--- Snap state persists in the ini alongside position/size/collapsed, and —
+--- like Pos/Size — a loaded ini entry beats a "once" call. Ignored by a
+--- window with the "AlwaysAutoResize" flag, like SetNextWindowSize().
+---
+--- No ImGui equivalent: this is edge SNAPPING, deliberately not docking —
+--- dock areas, tabs, and splitters stay out of scope (see ROADMAP.md).
+function imlove.SetNextWindowSnap(side, cond)
+  if side ~= "left" and side ~= "right" and side ~= nil then
+    error('imlove.SetNextWindowSnap(): side must be "left", "right", or nil'
+      .. ', got ' .. tostring(side), 2)
+  end
+  ctx.nextWindowSnap = { side = side, cond = cond or "always" }
+end
+
 --- Position of the current window. Equivalent of ImGui::GetWindowPos().
 function imlove.GetWindowPos()
   local win = requireWindow("GetWindowPos")
@@ -1648,6 +1847,17 @@ end
 function imlove.GetWindowSize()
   local win = requireWindow("GetWindowSize")
   return win.w, win.h
+end
+
+--- Which edge the current window is snapped to: "left", "right", or nil.
+--- The programmatic counterpart to the drag gesture — e.g. show an
+--- "unpin" button only while snapped, or mirror the live state back into
+--- whatever UI toggles it (the user may have dragged the window free, or
+--- onto an edge, since your code last set it). No ImGui equivalent (see
+--- SetNextWindowSnap()).
+function imlove.GetWindowSnap()
+  local win = requireWindow("GetWindowSnap")
+  return win.snap
 end
 
 --- Begin a scrollable child region embedded at the cursor in the current
@@ -3417,6 +3627,7 @@ local STYLE_VAR_SHAPES = {
   rounding      = "number",
   sliderWidth   = "number",
   grabWidth     = "number",
+  snapZone      = "number",
 }
 
 local function checkStyleVar(fnName, name, value)
