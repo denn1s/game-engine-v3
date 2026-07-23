@@ -329,6 +329,16 @@ local function pushCircle(win, mode, x, y, r, color)
     x = x, y = y, r = r, color = color }
 end
 
+-- Textures draw untinted (love.graphics.draw modulates by the current
+-- color, and Render() sets c.color before every command).
+local WHITE = { 1, 1, 1, 1 }
+
+local function pushImage(win, texture, x, y, w, h)
+  local tw, th = texture:getDimensions()
+  win.drawList[#win.drawList + 1] = { kind = "image", texture = texture,
+    x = x, y = y, sx = w / tw, sy = h / th, color = WHITE }
+end
+
 -- Push/pop a clip rectangle. Render() maintains a stack of these and
 -- intersects nested rects, so a clip pushed by a fixed-size window's content
 -- region and a BeginChild() inside it combine correctly. Widgets between a
@@ -1024,6 +1034,8 @@ function imlove.Render()
           g.line(c.x1, c.y1, c.x2, c.y2)
         elseif c.kind == "circle" then
           g.circle(c.mode, c.x, c.y, c.r)
+        elseif c.kind == "image" then
+          g.draw(c.texture, c.x, c.y, 0, c.sx, c.sy)
         end
       end
     end
@@ -3334,6 +3346,34 @@ function imlove.PlotHistogram(label, values, scaleMin, scaleMax, w, h,
   if win.skipItems then return end
   plotWidget(win, "histogram", label, values, scaleMin, scaleMax, w, h,
     overlay)
+end
+
+--- Draws a LÖVE Texture — an Image loaded from a file, or a Canvas
+--- something rendered into — as a w x h item at the cursor, scaled to fit
+--- (w/h default to the texture's own pixel size). Purely visual, like
+--- Text(): it occupies layout space and reports IsItemHovered(), but never
+--- captures the mouse. The classic use is a game viewport: render the game
+--- into a Canvas, then show that canvas inside a window, and the "game
+--- inside the editor" layout of Unity/Godot falls out of one widget call.
+--- Equivalent of ImGui::Image().
+function imlove.Image(texture, w, h)
+  local win = requireWindow("Image")
+  -- Validated eagerly (even in a skipped window), same reasoning as
+  -- PushFont(): a bad texture must fail HERE, naming the call that passed
+  -- it, not frames later inside Render(). Duck-typed (getDimensions)
+  -- rather than checking LÖVE's Texture userdata specifically, so
+  -- hand-built stubs work too — drawing is the only thing Render() ever
+  -- asks of it.
+  if not (texture and (type(texture) == "userdata" or type(texture) == "table")
+      and texture.getDimensions) then
+    error("imlove.Image(): expected a LÖVE Texture (Image or Canvas)", 2)
+  end
+  if win.skipItems then return end
+  local tw, th = texture:getDimensions()
+  w = (w and w > 0) and w or tw
+  h = (h and h > 0) and h or th
+  local x, y = itemAddPassive(win, w, h)
+  pushImage(win, texture, x, y, w, h)
 end
 
 --- A dropdown: shows `items[value]` (a plain array of strings) in a slider-
