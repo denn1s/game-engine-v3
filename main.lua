@@ -1,15 +1,20 @@
 ----------------------------------------------------------------------
--- Lesson 04: Debug tools
+-- Lesson 04.5 (optional): the editor window
 --
--- The engine gains a debug overlay built on imlove (our vendored
--- immediate-mode UI, lib/imlove.lua): an entity inspector, pause, and
--- frame-stepping. Press F1 in game, or start with `love . --debug`.
+-- `love . --debug` now opens a LARGER window with the game running
+-- inside a viewport — the tool panels snapped to the sides — like
+-- Unity's Game view. The trick is one primitive: the game renders into
+-- a fixed-size Canvas (a texture), and the overlay shows that texture
+-- inside a UI window. Plain `love .` is untouched: the game draws
+-- straight to the screen and F1 summons the overlay from lesson 04.
 --
 -- The overlay is NOT part of the game — and its wiring is not part of
 -- main.lua either. src/debug/attach.lua wraps the callbacks below so
 -- the overlay can watch the Game from outside; scenes never know it's
--- there. This file only bootstraps: register scenes, start one, hand
--- the LÖVE callbacks to the Game.
+-- there — and now they don't even know whether the "screen" they draw
+-- to is the real one or the editor's canvas. This file only
+-- bootstraps: register scenes, start one, hand the callbacks to the
+-- Game.
 --
 -- Key presses still enter the world as DATA: the Game turns each one
 -- into a `keyPressed` event entity in the current scene's registry
@@ -31,7 +36,7 @@ function love.load(args)
 
     attachDebugOverlay(Game)
     if args[1] == "--debug" then
-        DebugOverlay.toggle()
+        DebugOverlay.enterEditor()
     end
 end
 

@@ -8,18 +8,32 @@
 -- scene is current, and it survives scene switches. Scenes never know
 -- whether the inspector is watching them.
 --
---   F1   show/hide the overlay
+-- Started with `--debug`, the overlay goes one step further and becomes
+-- an EDITOR, Unity-style: the OS window grows, the game renders into a
+-- fixed-size canvas, and that canvas is shown in a viewport window with
+-- the tool panels around it (see enterEditor).
+--
+--   F1   show/hide the tool panels (the viewport is the game — it stays)
 --   F9   pause the game (the UI keeps running — that's the point)
 --   F10  advance exactly one frame while paused
 
 local imlove = require("lib.imlove")
 local Game = require("src.Game") -- for the scene switcher only
+local Screen = require("src.Screen") -- the game's resolution, one source
 
 local DebugOverlay = {}
 
 local visible = false
 local paused = false
 local stepOnce = false
+
+local editor = false -- --debug: game-in-a-viewport (see enterEditor)
+local gameCanvas = nil -- the game's render target while in editor mode
+
+-- The editor's backdrop, deliberately NOT black: the game keeps black
+-- (the canvas clears to it, see beginGameDraw), so the viewport reads
+-- as "the game", visibly distinct from the editor around it.
+local EDITOR_BG = { 0.16, 0.16, 0.18 }
 
 local selectedEntity = nil
 local inspectedComponent = 1 -- Combo index into the entity's components
@@ -78,7 +92,9 @@ local function componentEditor(registry, entity)
 end
 
 local function buildUi(scene)
-    imlove.SetNextWindowPos(10, 10, "once")
+    -- snapped to the left edge, full height ("once": drag it free if you
+    -- want a floating window — the layout is a default, not a law)
+    imlove.SetNextWindowSnap("left", "once")
     if imlove.Begin("Inspector") then
         -- every section is a CollapsingHeader (not TreeNode: headers are
         -- for a panel's top-level sections — full-width bar, no indent —
@@ -173,15 +189,14 @@ local function buildTransportBar()
     imlove.End()
 end
 
--- The Engine panel, docked at the top-right (the Inspector owns the
--- top-left). The split is by SUBJECT: the Inspector looks at DATA — the
+-- The Engine panel, snapped to the right edge (the Inspector owns the
+-- left). The split is by SUBJECT: the Inspector looks at DATA — the
 -- entities of one scene — while this panel drives the ENGINE: which
--- scene runs, which systems run. Fixed-size on purpose: when the dating
--- sim stacks up thirty systems, the list scrolls inside the panel
--- instead of growing down the whole screen.
+-- scene runs, which systems run. The width is set explicitly; a snapped
+-- window keeps it while the edge pins its height.
 local function buildEnginePanel(scene)
-    imlove.SetNextWindowPos(love.graphics.getWidth() - 240, 10, "once")
     imlove.SetNextWindowSize(230, 330, "once")
+    imlove.SetNextWindowSnap("right", "once")
     if imlove.Begin("Engine") then
         -- the switcher spawns the SAME switchRequest any system would —
         -- the tool has no special powers. Pressing the current scene's
@@ -213,8 +228,58 @@ local function buildEnginePanel(scene)
     imlove.End()
 end
 
+-- The game viewport: the canvas the game just rendered, framed by a
+-- window with no title bar and re-centered every frame — furniture,
+-- like the transport bar, not a document window. Note what it ISN'T:
+-- there is no special "draw the game here" machinery. The game already
+-- landed in a texture, and a texture in a window is one Image() call.
+local function buildGameViewport()
+    local sw, sh = love.graphics.getDimensions()
+    local gw, gh = gameCanvas:getDimensions()
+    local pad = imlove.GetStyle().windowPadding
+    imlove.SetNextWindowPos((sw - gw) / 2 - pad, (sh - gh) / 2 - pad)
+    if imlove.Begin("viewport", nil, { "NoTitleBar", "AlwaysAutoResize" }) then
+        imlove.Image(gameCanvas)
+    end
+    imlove.End()
+end
+
 function DebugOverlay.toggle()
     visible = not visible
+end
+
+-- Editor mode, entered once at startup (there is no way back — quit and
+-- relaunch without --debug): the OS window grows by half, the game gets
+-- a canvas at the resolution conf.lua asked for, and from then on it
+-- renders in there (see beginGameDraw), never noticing that the "screen"
+-- it fills is a texture inside a bigger window. Unity's Game view works
+-- exactly like this: the editor is a big app, the game draws into a
+-- render target, and a panel displays it.
+function DebugOverlay.enterEditor()
+    love.window.setMode(Screen.w * 1.5, Screen.h * 1.5)
+    gameCanvas = love.graphics.newCanvas(Screen.w, Screen.h)
+    love.graphics.setBackgroundColor(EDITOR_BG)
+    -- the editor keeps its OWN layout file: window positions saved in a
+    -- 1440-wide editor make no sense in the 960-wide plain game (and
+    -- vice versa), so the two modes must never share one ini.
+    imlove.io.IniFilename = "imlove-editor.ini"
+    editor = true
+    visible = true
+end
+
+-- Bracket the game's draw (see main.lua). In editor mode the game
+-- renders into the canvas, cleared to black — inside its viewport the
+-- game still owns the black. Outside editor mode both are no-ops and
+-- the game draws straight to the screen, exactly as before.
+function DebugOverlay.beginGameDraw()
+    if not editor then return end
+    love.graphics.setCanvas(gameCanvas)
+    love.graphics.clear(0, 0, 0, 1)
+end
+
+function DebugOverlay.endGameDraw()
+    if not editor then return end
+    love.graphics.setCanvas()
 end
 
 -- Call at the top of love.update, BEFORE the game updates: the UI reads
@@ -227,6 +292,13 @@ function DebugOverlay.beginFrame(scene)
         inspectedScene = scene
         selectedEntity = nil
         inspectedComponent = 1
+    end
+
+    -- the viewport is NOT gated on `visible`: in editor mode it IS the
+    -- game. F1 hides the tools around it, never the game itself. Built
+    -- first, so the panels stack in front of it if they ever overlap.
+    if editor then
+        buildGameViewport()
     end
 
     if visible then

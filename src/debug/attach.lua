@@ -47,8 +47,13 @@ return function(game)
 
     local draw = love.draw
     love.draw = function()
+        -- editor mode: the brackets redirect the game's whole draw into
+        -- a canvas (they are no-ops outside it) — the game never learns
+        -- its "screen" was a texture inside a bigger window
+        DebugOverlay.beginGameDraw()
         draw()
-        DebugOverlay.draw() -- last: UI on top of everything
+        DebugOverlay.endGameDraw()
+        DebugOverlay.draw() -- last: UI on top (incl. the viewport)
     end
 
     for _, event in ipairs(UI_EVENTS) do
