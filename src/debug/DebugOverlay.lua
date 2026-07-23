@@ -1,6 +1,7 @@
--- The debug overlay: an entity inspector with pause, frame-stepping, a
--- scene switcher, and live system on/off toggles, built on imlove
--- (lib/imlove.lua — vendored; see the lesson README).
+-- The debug overlay: an entity inspector, a Unity-style transport bar
+-- (play / pause / frame-step), a scene switcher, and live system on/off
+-- toggles, built on imlove (lib/imlove.lua — vendored; see the lesson
+-- README).
 --
 -- This is ENGINE tooling, not game code. It is not a system and it does
 -- not live in any scene: it sits next to the Game, inspecting whatever
@@ -77,12 +78,6 @@ local function buildUi(scene)
             -- budget: 60fps means staying under 16.7ms, always.
             imlove.PlotLines("##frametime", frameTimes, 0, 33.3, 0, 40,
                 ("%.1f ms"):format(frameTimes[#frameTimes] or 0))
-
-            paused = imlove.Checkbox("pause (F9)", paused)
-            imlove.SameLine()
-            if imlove.Button("step (F10)") then
-                stepOnce = true
-            end
         end
 
         local registry = scene.registry
@@ -120,6 +115,44 @@ local function buildUi(scene)
                 imlove.Text("entity %d", selectedEntity)
                 componentEditor(registry, selectedEntity)
             end
+        end
+    end
+    imlove.End()
+end
+
+-- The transport bar: Unity-style play / pause / step in a tiny strip,
+-- top-center. NoTitleBar also removes the drag region, so the bar can't
+-- be moved — it's furniture, not a document window. The "icons" are
+-- ASCII on purpose: imlove's font is LÖVE's default (Vera Sans), which
+-- has no play/pause glyphs — real ▶/⏸ would render as tofu boxes.
+local LIT = { 0.16, 0.53, 0.90, 1.00 } -- buttonActive blue: reads as "on"
+local DIM = { 0.50, 0.50, 0.50, 1.00 } -- textDisabled gray
+
+-- One transport button. `lit` tints it as the active state (exactly one
+-- of play/pause is lit at any time); a disabled button draws dim and
+-- swallows its clicks.
+local function transportButton(label, lit, enabled)
+    if lit then imlove.PushStyleColor("button", LIT) end
+    if not enabled then imlove.PushStyleColor("text", DIM) end
+    local clicked = imlove.Button(label, 28)
+    if not enabled then imlove.PopStyleColor() end
+    if lit then imlove.PopStyleColor() end
+    return clicked and enabled
+end
+
+local function buildTransportBar()
+    imlove.SetNextWindowPos(love.graphics.getWidth() / 2 - 62, 10, "once")
+    if imlove.Begin("transport", nil, { "NoTitleBar", "AlwaysAutoResize" }) then
+        if transportButton(">", not paused, true) then -- play = unpause
+            paused = false
+        end
+        imlove.SameLine()
+        if transportButton("||", paused, true) then
+            paused = true
+        end
+        imlove.SameLine()
+        if transportButton(">|", false, paused) then -- step: only paused
+            stepOnce = true
         end
     end
     imlove.End()
@@ -190,6 +223,7 @@ function DebugOverlay.beginFrame(scene)
     if visible then
         buildUi(scene)
         buildEnginePanel(scene)
+        buildTransportBar()
     end
 end
 
