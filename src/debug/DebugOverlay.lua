@@ -21,6 +21,9 @@ local stepOnce = false
 local selectedEntity = nil
 local inspectedScene = nil -- to drop the selection when the scene changes
 
+local FRAME_HISTORY = 120 -- two seconds' worth at 60fps
+local frameTimes = {} -- rolling window of dt, in milliseconds
+
 local function componentEditor(registry, entity)
     for _, name in ipairs(registry:componentsOf(entity)) do
         if imlove.TreeNode(name) then
@@ -52,6 +55,14 @@ local function buildUi(scene)
     if imlove.Begin("Inspector") then
         imlove.Text("scene: %s    FPS: %d", scene.name, love.timer.getFPS())
 
+        -- frame TIME, not just FPS: FPS is an average, and averages hide
+        -- spikes — one 50ms hitch among fifty smooth frames barely moves
+        -- the number, but the player felt it. The scale is pinned at
+        -- 0-33ms so the graph itself teaches the budget: 60fps means
+        -- staying under 16.7ms, always.
+        imlove.PlotLines("##frametime", frameTimes, 0, 33.3, 0, 40,
+            ("%.1f ms"):format(frameTimes[#frameTimes] or 0))
+
         paused = imlove.Checkbox("pause (F9)", paused)
         imlove.SameLine()
         if imlove.Button("step (F10)") then
@@ -62,15 +73,22 @@ local function buildUi(scene)
 
         local registry = scene.registry
         if imlove.TreeNode("entities") then
-            for _, entity in ipairs(registry:entities()) do
-                imlove.PushID(entity)
-                local label = ("%d: %s"):format(entity,
-                    table.concat(registry:componentsOf(entity), " "))
-                if imlove.Selectable(label, selectedEntity == entity) then
-                    selectedEntity = entity
+            -- a fixed-height scrolling region: the list must stay usable
+            -- when a scene holds hundreds of entities, not just pong's
+            -- dozen. (BeginChild must ALWAYS be matched by EndChild,
+            -- even when it reports itself as not visible.)
+            if imlove.BeginChild("entityList", 0, 150, true) then
+                for _, entity in ipairs(registry:entities()) do
+                    imlove.PushID(entity)
+                    local label = ("%d: %s"):format(entity,
+                        table.concat(registry:componentsOf(entity), " "))
+                    if imlove.Selectable(label, selectedEntity == entity) then
+                        selectedEntity = entity
+                    end
+                    imlove.PopID()
                 end
-                imlove.PopID()
             end
+            imlove.EndChild()
             imlove.TreePop()
         end
 
@@ -96,6 +114,13 @@ end
 -- and edits the state the previous frame produced.
 function DebugOverlay.beginFrame(scene)
     imlove.NewFrame()
+
+    -- sampled even while paused or hidden: the plot reports the real
+    -- frame, tool cost included, and has history the moment you open it
+    frameTimes[#frameTimes + 1] = love.timer.getDelta() * 1000
+    if #frameTimes > FRAME_HISTORY then
+        table.remove(frameTimes, 1)
+    end
 
     if scene ~= inspectedScene then -- entity numbers reset with the registry
         inspectedScene = scene
