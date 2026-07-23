@@ -1,6 +1,8 @@
 -- Draws everything: the court, every entity with position + size, and
 -- the UI. It's the only system with a `draw` instead of an `update`.
 
+local Screen = require("src.Screen")
+
 local RenderSystem = { name = "render" }
 
 local bigFont, smallFont
@@ -21,8 +23,8 @@ end
 
 function RenderSystem.draw(scene)
     local registry = scene.registry
-    local screenW = love.graphics.getWidth()
-    local screenH = love.graphics.getHeight()
+    local screenW = Screen.w
+    local screenH = Screen.h
 
     -- center line
     love.graphics.setColor(1, 1, 1, 0.35)

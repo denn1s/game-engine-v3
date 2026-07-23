@@ -6,6 +6,8 @@
 -- emits a `serveRequest` event-entity; the BallSpawnSystem takes it
 -- from there. Systems talk through data, never through function calls.
 
+local Screen = require("src.Screen")
+
 local ScoringSystem = { name = "scoring" }
 
 -- This system owns the match state, so it creates it.
@@ -21,7 +23,7 @@ end
 function ScoringSystem.update(scene, dt)
     local registry = scene.registry
     local _, match = registry:first("match")
-    local screenW = love.graphics.getWidth()
+    local screenW = Screen.w
 
     for ballEntity, pos, size in registry:each("position", "size", "ball") do
         local serveDirection

@@ -6,6 +6,8 @@
 -- This is the "events as entities" pattern: systems never call each
 -- other — they communicate by writing data into the registry.
 
+local Screen = require("src.Screen")
+
 local START_SPEED = 280
 local SIZE = 14
 
@@ -24,8 +26,8 @@ function BallSpawnSystem.update(scene, dt)
 
         registry:spawn({
             position = {
-                x = (love.graphics.getWidth() - SIZE) / 2,
-                y = (love.graphics.getHeight() - SIZE) / 2,
+                x = (Screen.w - SIZE) / 2,
+                y = (Screen.h - SIZE) / 2,
             },
             size = { w = SIZE, h = SIZE },
             velocity = {

@@ -1,6 +1,8 @@
 -- Draws the results screen from the `finalScore` data the scene factory
 -- spawned out of the switch payload.
 
+local Screen = require("src.Screen")
+
 local GameOverRenderSystem = { name = "gameOverRender" }
 
 local bigFont, smallFont
@@ -18,8 +20,8 @@ end
 
 function GameOverRenderSystem.draw(scene)
     local _, finalScore = scene.registry:first("finalScore")
-    local screenW = love.graphics.getWidth()
-    local screenH = love.graphics.getHeight()
+    local screenW = Screen.w
+    local screenH = Screen.h
 
     local winner = finalScore.left > finalScore.right and "Left" or "Right"
 
