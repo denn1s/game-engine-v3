@@ -63,27 +63,28 @@ end
 local function buildUi(scene)
     imlove.SetNextWindowPos(10, 10, "once")
     if imlove.Begin("Inspector") then
-        imlove.Text("FPS: %d", love.timer.getFPS())
+        -- every section is a CollapsingHeader (not TreeNode: headers are
+        -- for a panel's top-level sections — full-width bar, no indent —
+        -- tree nodes are for nesting INSIDE content, same convention as
+        -- Dear ImGui). All default open; fold what you don't need.
+        if imlove.CollapsingHeader("frame", true) then
+            imlove.Text("FPS: %d", love.timer.getFPS())
 
-        -- frame TIME, not just FPS: FPS is an average, and averages hide
-        -- spikes — one 50ms hitch among fifty smooth frames barely moves
-        -- the number, but the player felt it. The scale is pinned at
-        -- 0-33ms so the graph itself teaches the budget: 60fps means
-        -- staying under 16.7ms, always.
-        imlove.PlotLines("##frametime", frameTimes, 0, 33.3, 0, 40,
-            ("%.1f ms"):format(frameTimes[#frameTimes] or 0))
+            -- frame TIME, not just FPS: FPS is an average, and averages
+            -- hide spikes — one 50ms hitch among fifty smooth frames
+            -- barely moves the number, but the player felt it. The scale
+            -- is pinned at 0-33ms so the graph itself teaches the
+            -- budget: 60fps means staying under 16.7ms, always.
+            imlove.PlotLines("##frametime", frameTimes, 0, 33.3, 0, 40,
+                ("%.1f ms"):format(frameTimes[#frameTimes] or 0))
 
-        paused = imlove.Checkbox("pause (F9)", paused)
-        imlove.SameLine()
-        if imlove.Button("step (F10)") then
-            stepOnce = true
+            paused = imlove.Checkbox("pause (F9)", paused)
+            imlove.SameLine()
+            if imlove.Button("step (F10)") then
+                stepOnce = true
+            end
         end
 
-        imlove.Separator()
-
-        -- CollapsingHeader, not TreeNode: headers are for a panel's
-        -- top-level sections (full-width bar, no indent), tree nodes are
-        -- for nesting INSIDE content. Same convention as Dear ImGui.
         local registry = scene.registry
         if imlove.CollapsingHeader("entities", true) then
             -- a fixed-height scrolling region: the list must stay usable
@@ -111,9 +112,14 @@ local function buildUi(scene)
         end
 
         if selectedEntity then
-            imlove.Separator()
-            imlove.Text("entity %d", selectedEntity)
-            componentEditor(registry, selectedEntity)
+            -- a STATIC label on purpose: imlove keys header state by the
+            -- full label, so a dynamic "entity 7" would get fresh state
+            -- per entity — and stale state when numbers recycle across
+            -- scenes. The number is shown inside instead.
+            if imlove.CollapsingHeader("selected entity", true) then
+                imlove.Text("entity %d", selectedEntity)
+                componentEditor(registry, selectedEntity)
+            end
         end
     end
     imlove.End()
