@@ -63,7 +63,7 @@ end
 local function buildUi(scene)
     imlove.SetNextWindowPos(10, 10, "once")
     if imlove.Begin("Inspector") then
-        imlove.Text("scene: %s    FPS: %d", scene.name, love.timer.getFPS())
+        imlove.Text("FPS: %d", love.timer.getFPS())
 
         -- frame TIME, not just FPS: FPS is an average, and averages hide
         -- spikes — one 50ms hitch among fifty smooth frames barely moves
@@ -81,8 +81,11 @@ local function buildUi(scene)
 
         imlove.Separator()
 
+        -- CollapsingHeader, not TreeNode: headers are for a panel's
+        -- top-level sections (full-width bar, no indent), tree nodes are
+        -- for nesting INSIDE content. Same convention as Dear ImGui.
         local registry = scene.registry
-        if imlove.TreeNode("entities") then
+        if imlove.CollapsingHeader("entities", true) then
             -- a fixed-height scrolling region: the list must stay usable
             -- when a scene holds hundreds of entities, not just pong's
             -- dozen. (BeginChild must ALWAYS be matched by EndChild,
@@ -100,7 +103,6 @@ local function buildUi(scene)
                 end
             end
             imlove.EndChild()
-            imlove.TreePop()
         end
 
         -- the selected entity may have been destroyed since last frame
@@ -133,6 +135,7 @@ local function buildEnginePanel(scene)
         -- restart button. While paused the request just sits in the
         -- registry: Game.update is what honors it, on the next step.
         if imlove.CollapsingHeader("scenes", true) then
+            imlove.Text("current: %s", scene.name)
             for i, name in ipairs(Game.sceneNames()) do
                 if i > 1 then imlove.SameLine() end
                 if imlove.Button(name) then
