@@ -1,0 +1,13 @@
+-- The game's logical resolution — the ONE place it is written down.
+-- conf.lua reads it to size the real window; systems read it to place,
+-- bounce, and clamp things; the editor (lesson 04.5) reads it to size
+-- the canvas the game renders into.
+--
+-- Until this lesson, systems asked `love.graphics.getWidth()` instead,
+-- and it happened to return the same 960 — a hidden assumption that the
+-- window IS the game. The editor broke it on purpose: its window is
+-- 1440 wide while the game stays 960. The window belongs to the
+-- platform; the RESOLUTION belongs to the game. (Unity draws the same
+-- line: `Screen.width` in game code reports the game's resolution, not
+-- the editor window's.)
+return { w = 960, h = 540 }

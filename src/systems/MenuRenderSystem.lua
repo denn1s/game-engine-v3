@@ -1,5 +1,7 @@
 -- Draws the title screen.
 
+local Screen = require("src.Screen")
+
 local MenuRenderSystem = { name = "menuRender" }
 
 local titleFont, smallFont
@@ -16,8 +18,8 @@ function MenuRenderSystem.unload(scene)
 end
 
 function MenuRenderSystem.draw(scene)
-    local screenW = love.graphics.getWidth()
-    local screenH = love.graphics.getHeight()
+    local screenW = Screen.w
+    local screenH = Screen.h
 
     love.graphics.setFont(titleFont)
     love.graphics.printf("PONG", 0, screenH * 0.28, screenW, "center")

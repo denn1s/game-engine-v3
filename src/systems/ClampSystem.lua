@@ -1,12 +1,14 @@
 -- Keeps entities tagged with a `clamp` component inside the window
 -- (vertically). The paddles use this. Runs AFTER movement.
 
+local Screen = require("src.Screen")
+
 local ClampSystem = { name = "clamp" }
 
 function ClampSystem.update(scene, dt)
     local registry = scene.registry
 
-    local screenH = love.graphics.getHeight()
+    local screenH = Screen.h
 
     -- the `clamp` tag goes last: its (empty) value just falls off the end
     for _, pos, size in registry:each("position", "size", "clamp") do

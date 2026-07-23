@@ -1,14 +1,16 @@
 -- Reads the keyboard and turns it into velocity for paddle entities.
 -- Note it doesn't move anything: that's the MovementSystem's job.
 
+local Screen = require("src.Screen")
+
 local MARGIN = 30 -- distance from paddles to the side walls
 
 local PaddleControlSystem = { name = "paddleControl" }
 
 -- This system owns the paddles, so it creates them.
 function PaddleControlSystem.setup(scene)
-    local screenW = love.graphics.getWidth()
-    local screenH = love.graphics.getHeight()
+    local screenW = Screen.w
+    local screenH = Screen.h
 
     local function paddlePrefab(x, upKey, downKey)
         return {
