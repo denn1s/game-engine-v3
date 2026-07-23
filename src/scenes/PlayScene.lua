@@ -18,8 +18,12 @@ local RenderSystem = require("src.systems.RenderSystem")
 return function(payload)
     local scene = Scene.new("play")
 
-    -- system order IS the frame order: spawn -> input -> simulate ->
-    -- resolve -> score -> decide -> draw
+    -- system order IS the frame order. Input systems go first: they
+    -- only fill components and spawn event entities; everything after
+    -- them mutates the world.
+    -- input -> spawn -> control -> simulate -> resolve -> score ->
+    -- decide -> draw
+    scene:addSystem(DebugSystem)
     scene:addSystem(BallSpawnSystem)
     scene:addSystem(PaddleControlSystem)
     scene:addSystem(MovementSystem)
@@ -28,7 +32,6 @@ return function(payload)
     scene:addSystem(PaddleHitsSystem)
     scene:addSystem(ScoringSystem)
     scene:addSystem(WinCheckSystem)
-    scene:addSystem(DebugSystem)
     scene:addSystem(RenderSystem)
 
     return scene

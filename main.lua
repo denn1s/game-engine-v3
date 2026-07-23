@@ -7,6 +7,10 @@
 -- entity handling, no restart logic. The scene graph IS the state
 -- machine.
 --
+-- Key presses still enter the world as DATA: the Game turns each one
+-- into a `keyPressed` event entity in the current scene's registry
+-- (see Game.keypressed), and whichever systems care consume it there.
+--
 -- menu --SPACE--> play --someone wins--> gameover --SPACE--> menu
 ----------------------------------------------------------------------
 

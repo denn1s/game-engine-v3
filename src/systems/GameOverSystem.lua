@@ -3,9 +3,11 @@
 
 local GameOverSystem = {}
 
-function GameOverSystem.keypressed(scene, key)
-    if key == "space" then
-        scene.registry:spawn({ switchRequest = { to = "menu" } })
+function GameOverSystem.update(scene, dt)
+    for _, event in scene.registry:each("keyPressed") do
+        if event.key == "space" then
+            scene.registry:spawn({ switchRequest = { to = "menu" } })
+        end
     end
 end
 
