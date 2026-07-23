@@ -7,6 +7,12 @@
 --
 -- The overlay is NOT part of the game. It sits next to the Game,
 -- watching whatever scene is current; scenes never know it's there.
+--
+-- Key presses still enter the world as DATA: the Game turns each one
+-- into a `keyPressed` event entity in the current scene's registry
+-- (see Game.keypressed) — unless the overlay consumed them first.
+--
+-- menu --SPACE--> play --someone wins--> gameover --SPACE--> menu
 ----------------------------------------------------------------------
 
 local Game = require("src.Game")

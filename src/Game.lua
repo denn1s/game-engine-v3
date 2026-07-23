@@ -38,6 +38,13 @@ end
 function Game.update(dt)
     current:update(dt)
 
+    -- key events are broadcasts: systems READ them, nobody destroys
+    -- them. Their frame is over, so the Game — which spawned them —
+    -- sweeps them now. Input lives for exactly one update.
+    for _, entity in ipairs(current.registry:query("keyPressed")) do
+        current.registry:destroy(entity)
+    end
+
     -- the frame is over; now it's safe to honor a switch request
     local _, request = current.registry:first("switchRequest")
     if request then
@@ -54,7 +61,11 @@ function Game.keypressed(key)
         love.event.quit()
         return
     end
-    current:keypressed(key)
+    -- everything else enters the world as DATA: a `keyPressed` event
+    -- entity. LÖVE delivers key events BEFORE love.update, so every
+    -- system sees it during this frame's update; Game.update sweeps it
+    -- afterwards.
+    current.registry:spawn({ keyPressed = { key = key } })
 end
 
 function Game.quit()

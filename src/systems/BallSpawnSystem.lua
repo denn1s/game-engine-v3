@@ -19,8 +19,7 @@ end
 function BallSpawnSystem.update(scene, dt)
     local registry = scene.registry
 
-    for _, requestEntity in ipairs(registry:query("serveRequest")) do
-        local request = registry:get(requestEntity, "serveRequest")
+    for requestEntity, request in registry:each("serveRequest") do
         registry:destroy(requestEntity) -- consume the event
 
         registry:spawn({

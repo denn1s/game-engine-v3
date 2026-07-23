@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What is an ECS? — an interactive field guide</title>
+<style>
+/* ---------- tokens ---------- */
+:root {
+  --bg: #f2f5f8; --panel: #ffffff; --panel2: #e8edf2;
+  --ink: #17222e; --muted: #5d6c7b; --line: #d2dce4;
+  --accent: #2456e6; --accent-soft: #e3eafd;
+  --danger: #c2321f;
+  /* component colors — one per component TYPE, used everywhere on this page */
+  --c-pos:  #0b7285;  /* position  */
+  --c-vel:  #b45309;  /* velocity  */
+  --c-drw:  #6d28d9;  /* drawable  */
+  --c-pad:  #2e7d32;  /* paddle    */
+  --c-ball: #c2185b;  /* ball      */
+  --c-size: #64748b;  /* size      */
+  --c-scr:  #1d4ed8;  /* score     */
+  --sans: system-ui, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, monospace;
+  --shadow: 0 1px 2px rgba(23,34,46,.06), 0 8px 24px -12px rgba(23,34,46,.14);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e141b; --panel: #151d26; --panel2: #1e2833;
+    --ink: #e4ecf4; --muted: #8b9aa9; --line: #2b3846;
+    --accent: #7aa2ff; --accent-soft: #1b2a4d;
+    --danger: #ff7a66;
+    --c-pos:  #4fd6ea; --c-vel: #f5b04a; --c-drw: #b79cff;
+    --c-pad:  #7fd88a; --c-ball:#f77bb1; --c-size:#9aa8b8; --c-scr:#8fb0ff;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -14px rgba(0,0,0,.6);
+  }
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 64px; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 17px/1.65 var(--sans);
+  /* faint dotted grid: this page is graph paper for game data */
+  background-image: radial-gradient(color-mix(in srgb, var(--ink) 9%, transparent) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+::selection { background: var(--accent); color: #fff; }
+main { max-width: 1060px; margin: 0 auto; padding: 0 22px 90px; }
+p { max-width: 68ch; }
+a { color: var(--accent); text-underline-offset: 3px; }
+strong { color: var(--ink); }
+h2 {
+  font-size: clamp(1.6rem, 3.2vw, 2.15rem); font-weight: 800;
+  letter-spacing: -0.02em; line-height: 1.15; margin: 0.25em 0 0.5em;
+}
+.eyebrow {
+  font: 700 0.78rem/1 var(--mono); color: var(--muted);
+  letter-spacing: 0.12em; text-transform: lowercase;
+}
+.eyebrow b { color: var(--accent); }
+section { margin-top: 96px; }
+code {
+  font-family: var(--mono); font-size: 0.86em;
+  background: var(--panel2); padding: 1px 6px; border-radius: 5px;
+}
+
+/* ---------- nav ---------- */
+nav {
+  position: sticky; top: 0; z-index: 40;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  display: flex; gap: 20px; align-items: center; overflow-x: auto;
+  padding: 11px 22px; font: 600 0.8rem/1 var(--mono);
+}
+nav .brand { color: var(--ink); font-weight: 800; white-space: nowrap; }
+nav a { color: var(--muted); text-decoration: none; white-space: nowrap; }
+nav a:hover { color: var(--accent); }
+
+/* ---------- the visual grammar: entity / component / system ---------- */
+.eid {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 2em; height: 2em; padding: 0 0.45em;
+  border: 2px solid var(--ink); border-radius: 999px;
+  font: 700 0.82rem/1 var(--mono); background: var(--panel);
+}
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 999px;
+  font: 600 0.78rem/1.3 var(--mono); white-space: nowrap;
+  color: var(--cc);
+  background: color-mix(in srgb, var(--cc) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cc) 45%, transparent);
+}
+.chip.pos  { --cc: var(--c-pos); }  .chip.vel  { --cc: var(--c-vel); }
+.chip.drw  { --cc: var(--c-drw); }  .chip.pad  { --cc: var(--c-pad); }
+.chip.ball { --cc: var(--c-ball); } .chip.size { --cc: var(--c-size); }
+.chip.scr  { --cc: var(--c-scr); }
+.sys {
+  display: inline-block; padding: 4px 10px; border-radius: 6px;
+  background: var(--ink); color: var(--bg);
+  font: 700 0.78rem/1.3 var(--mono); white-space: nowrap;
+}
+.mono { font-family: var(--mono); font-size: 0.88em; }
+
+/* ---------- hero ---------- */
+header.hero { padding-top: 72px; }
+.hero h1 {
+  margin: 10px 0 8px; font-weight: 850; letter-spacing: -0.035em;
+  font-size: clamp(2.4rem, 6.4vw, 4.2rem); line-height: 1.02;
+}
+.hero h1 .hl { color: var(--accent); }
+.hero .sub { color: var(--muted); font-size: 1.15rem; max-width: 56ch; }
+.defs {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+  margin-top: 40px;
+}
+.def {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 20px 20px 18px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.def .letter {
+  font: 850 2.6rem/1 var(--sans); letter-spacing: -0.03em;
+}
+.def .demo { min-height: 58px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.def .eid.big { min-width: 2.6em; height: 2.6em; font-size: 1.05rem; }
+.def p { margin: 0; font-size: 0.92rem; color: var(--muted); max-width: none; }
+.def p b { color: var(--ink); }
+.grammar-note {
+  margin-top: 18px; font: 600 0.8rem/1.6 var(--mono); color: var(--muted);
+  max-width: none;
+}
+
+/* ---------- figures & cards ---------- */
+.fig {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 22px; margin: 26px 0; box-shadow: var(--shadow);
+}
+.fig figcaption, .caption {
+  font: 600 0.78rem/1.55 var(--mono); color: var(--muted); margin-top: 14px;
+}
+
+/* class-tree figure */
+.tree { font: 0.86rem/1.9 var(--mono); overflow-x: auto; }
+.tree .node b { font-weight: 700; }
+.tree .fields { color: var(--muted); }
+.tree .broken { color: var(--danger); font-weight: 700; }
+.tree .broken .fields { color: color-mix(in srgb, var(--danger) 70%, var(--muted)); }
+
+/* objects → table figure */
+.flip { display: grid; grid-template-columns: 1fr auto 1.4fr; gap: 18px; align-items: center; }
+.objcard {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel2);
+  padding: 12px 14px; font: 0.8rem/1.7 var(--mono); margin-bottom: 12px;
+}
+.objcard .title { font-weight: 800; }
+.objcard .dead { text-decoration: line-through; color: var(--danger); opacity: 0.85; }
+.flip-arrow { font-size: 1.6rem; color: var(--accent); text-align: center; }
+.homeless { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* ---------- registry tables (shared look) ---------- */
+.regtable { border-collapse: collapse; width: 100%; font: 0.78rem/1.5 var(--mono); }
+.regtable th, .regtable td {
+  border: 1px solid var(--line); padding: 6px 9px; text-align: left;
+  white-space: nowrap;
+}
+.regtable th { background: var(--panel2); font-weight: 600; }
+.regtable td.empty { color: color-mix(in srgb, var(--muted) 55%, transparent); text-align: center; }
+.regtable td.val { color: var(--cc, var(--ink)); }
+.regtable .rowhead { background: var(--panel2); }
+.tablewrap { overflow-x: auto; }
+
+/* ---------- playground ---------- */
+.playground { padding: 18px; }
+.pg-grid { display: grid; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.pg-row { display: grid; grid-template-columns: 74px repeat(5, minmax(118px, 1fr)) 40px; gap: 6px; align-items: stretch; }
+.pg-row.header { position: static; }
+.pg-row.header > div { display: flex; align-items: flex-end; padding-bottom: 4px; }
+.pg-rowhead { display: flex; align-items: center; gap: 6px; }
+.pg-cell {
+  appearance: none; border-radius: 9px; cursor: pointer;
+  font: 600 0.72rem/1.35 var(--mono); padding: 8px 9px; text-align: left;
+  min-height: 52px; transition: transform .08s ease, border-color .15s, background .15s;
+}
+.pg-cell:active { transform: scale(0.97); }
+.pg-cell.off {
+  border: 1.5px dashed color-mix(in srgb, var(--muted) 45%, transparent);
+  background: transparent; color: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+.pg-cell.off:hover { border-color: var(--cc); color: var(--cc); }
+.pg-cell.on {
+  border: 1.5px solid color-mix(in srgb, var(--cc) 55%, transparent);
+  background: color-mix(in srgb, var(--cc) 12%, var(--panel));
+  color: var(--cc);
+}
+.pg-cell.on .data { display: block; color: color-mix(in srgb, var(--cc) 72%, var(--ink)); font-weight: 500; margin-top: 2px; }
+.pg-kill {
+  appearance: none; border: none; background: transparent; cursor: pointer;
+  color: var(--muted); font: 700 0.9rem/1 var(--mono); border-radius: 8px;
+}
+.pg-kill:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.pg-row.matched .pg-rowhead .eid { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.pg-row.dimmed .pg-cell, .pg-row.dimmed .eid { opacity: 0.32; }
+.pg-row.dying { animation: die .45s ease forwards; }
+@keyframes die { to { opacity: 0; transform: translateX(14px); } }
+.pg-row.born .pg-rowhead .eid { animation: pop .4s ease; }
+@keyframes pop { 0% { transform: scale(0.4); } 70% { transform: scale(1.15); } 100% { transform: scale(1); } }
+
+.querybar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 18px; }
+.qresult {
+  font: 700 0.85rem/1.5 var(--mono); margin-top: 10px; min-height: 1.6em;
+  color: var(--accent);
+}
+.pg-status { font: 600 0.78rem/1.6 var(--mono); color: var(--muted); margin-top: 8px; min-height: 1.6em; }
+
+/* ---------- buttons ---------- */
+.btn {
+  appearance: none; cursor: pointer; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font: 700 0.78rem/1.3 var(--mono); padding: 7px 13px;
+  transition: border-color .15s, background .15s, transform .08s;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn:active { transform: scale(0.97); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { filter: brightness(1.1); color: #fff; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn.q.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+/* ---------- live demo ---------- */
+.demo-shell { padding: 18px; }
+.demo-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+.court-wrap { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+canvas#court {
+  width: 100%; aspect-ratio: 16 / 9; display: block;
+  background: var(--panel2); border-radius: 10px; border: 1px solid var(--line);
+}
+.transport { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.demo-status { font: 600 0.76rem/1.6 var(--mono); color: var(--muted); min-height: 3.1em; }
+.demo-status b { color: var(--accent); }
+
+.syslist { display: flex; flex-direction: column; gap: 6px; }
+.sysrow {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px;
+  background: var(--panel); transition: box-shadow .2s, border-color .2s;
+}
+.sysrow .q { display: flex; gap: 5px; flex-wrap: wrap; }
+.sysrow .chip { font-size: 0.68rem; padding: 2px 8px; }
+.sysrow input { accent-color: var(--accent); width: 15px; height: 15px; }
+.sysrow.off .sys { opacity: 0.35; }
+.sysrow.off .chip { opacity: 0.35; }
+.sysrow.firing { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.regpanel { min-width: 0; }
+.regpanel h3 { margin: 0 0 8px; font: 700 0.78rem/1 var(--mono); letter-spacing: 0.1em; color: var(--muted); text-transform: lowercase; }
+#demo-table td, #demo-table th { padding: 3px 6px; font-size: 0.7rem; }
+#demo-table .chip { padding: 1px 5px; font-size: 0.62rem; border-radius: 5px; }
+#demo-table .eid { min-width: 1.7em; height: 1.7em; border-width: 1.5px; font-size: 0.68rem; }
+#demo-table tr.born td { animation: rowborn 1s ease; }
+@keyframes rowborn { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
+#demo-table tr.touched td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.try {
+  margin-top: 18px; border-left: 3px solid var(--accent);
+  padding: 4px 0 4px 16px; font-size: 0.92rem;
+}
+.try li { margin: 6px 0; max-width: 70ch; }
+.try li b { font-family: var(--mono); font-size: 0.85em; }
+
+/* ---------- why cards ---------- */
+.why { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 26px; }
+.why .card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 20px; box-shadow: var(--shadow);
+}
+.why h3 { margin: 0 0 8px; font-size: 1.02rem; font-weight: 800; letter-spacing: -0.01em; }
+.why p { font-size: 0.9rem; color: var(--muted); margin: 0 0 10px; }
+.why .card .art { margin-top: 12px; }
+
+/* memory strip */
+.mem { display: flex; flex-direction: column; gap: 10px; }
+.mem .label { font: 600 0.68rem/1 var(--mono); color: var(--muted); }
+.strip { display: flex; gap: 3px; position: relative; padding: 3px 0; }
+.cellu {
+  width: 12px; height: 12px; border-radius: 3px; flex: none;
+  background: color-mix(in srgb, var(--muted) 22%, transparent);
+}
+.cellu.p { background: var(--c-pos); } .cellu.v { background: var(--c-vel); }
+.cellu.d { background: var(--c-drw); } .cellu.b { background: var(--c-ball); }
+.sweep {
+  position: absolute; top: 0; left: 0; width: 15px; height: 18px;
+  border: 2px solid var(--accent); border-radius: 4px;
+  animation: sweep 3.2s linear infinite;
+}
+@keyframes sweep { from { transform: translateX(0); } to { transform: translateX(225px); } }
+
+/* stack-of-chips composition art */
+.stackart { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
+.stackart .plus { color: var(--muted); font: 700 0.8rem/1 var(--mono); }
+
+/* ---------- code ---------- */
+pre {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 18px 20px; overflow-x: auto; box-shadow: var(--shadow);
+  font: 0.8rem/1.6 var(--mono);
+}
+pre .k { color: var(--c-ball); } pre .s { color: var(--c-pad); }
+pre .c { color: var(--muted); font-style: italic; }
+pre .f { color: var(--c-scr); }
+.run {
+  display: inline-block; font: 600 0.82rem/1.4 var(--mono);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 12px; margin: 3px 4px 3px 0;
+}
+.run::before { content: "$ "; color: var(--muted); }
+
+/* ---------- footer mantra ---------- */
+footer { margin-top: 110px; border-top: 2px solid var(--ink); padding-top: 30px; }
+.mantra { display: flex; flex-direction: column; gap: 14px; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
+.mantra .line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mantra .line .is { color: var(--muted); font-weight: 400; }
+footer .next { margin-top: 30px; color: var(--muted); font-size: 0.95rem; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 900px) {
+  .defs { grid-template-columns: 1fr; }
+  .demo-grid { grid-template-columns: 1fr; }
+  .why { grid-template-columns: 1fr; }
+  .flip { grid-template-columns: 1fr; }
+  .flip-arrow { transform: rotate(90deg); }
+  section { margin-top: 70px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .sweep, .pg-row.born .eid, .pg-row.dying, #demo-table tr.born td { animation: none; }
+  * { transition: none !important; }
+}
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="brand">ECS</span>
+  <a href="#wall">the wall</a>
+  <a href="#flip">the flip</a>
+  <a href="#poke">poke it</a>
+  <a href="#systems">live pong</a>
+  <a href="#why">why it wins</a>
+  <a href="#yours">your registry</a>
+</nav>
+
+<main>
+
+<!-- ================= HERO ================= -->
+<header class="hero">
+  <span class="eyebrow">game engine architectures <b>·</b> deep dive</span>
+  <h1>Entities have <span class="hl">data</span>.<br>Systems do <span class="hl">things</span>.</h1>
+  <p class="sub">ECS explained by poking one. Almost everything on this page is alive — click cells, flip switches, break the game and watch the data keep going.</p>
+
+  <div class="defs">
+    <div class="def">
+      <span class="letter">E</span>
+      <div class="demo"><span class="eid big">#7</span></div>
+      <p><b>An entity is just a number.</b> An ID. No fields, no methods, no class. It exists only as a key that other tables remember.</p>
+    </div>
+    <div class="def">
+      <span class="letter">C</span>
+      <div class="demo">
+        <span class="chip pos">position</span>
+        <span class="mono" style="color:var(--muted)">{ x = 240, y = 135 }</span>
+      </div>
+      <p><b>A component is plain data</b> attached to an entity. A little table of values. It can't do anything — and that's the point.</p>
+    </div>
+    <div class="def">
+      <span class="letter">S</span>
+      <div class="demo">
+        <span class="sys">MovementSystem</span>
+        <span class="mono" style="color:var(--muted)">query(<span style="color:var(--c-pos)">position</span>, <span style="color:var(--c-vel)">velocity</span>)</span>
+      </div>
+      <p><b>A system is a function</b> that runs every frame over every entity matching its query, and does exactly one job.</p>
+    </div>
+  </div>
+  <p class="grammar-note">these three shapes repeat everywhere below — circled numbers are entities, colored pills are components, dark tags are systems.</p>
+</header>
+
+<!-- ================= 01 THE WALL ================= -->
+<section id="wall">
+  <span class="eyebrow">01 <b>·</b> the problem</span>
+  <h2>The wall every class tree hits</h2>
+  <p>In lesson 01, Pong was a handful of classes and life was good. Classes stop being good the moment the <em>design</em> changes underneath them. Say the designer wants a power-up: a ball that a player can briefly steer.</p>
+
+  <figure class="fig">
+    <div class="tree">
+<div class="node"><b>GameObject</b> <span class="fields">— x, y, update(), draw()</span></div>
+<div class="node">├─ <b>Paddle</b> <span class="fields">— + readInput()</span></div>
+<div class="node">├─ <b>Ball</b> <span class="fields">— + bounce()</span></div>
+<div class="node broken">└─ <b>SteerableBall??</b> <span class="fields">— needs Ball's bounce() <u>and</u> Paddle's readInput()</span></div>
+    </div>
+    <figcaption>your options: multiple inheritance (pain), copy-paste (worse), or refactoring the whole tree for one power-up (again next sprint).</figcaption>
+  </figure>
+
+  <p>The tree keeps answering <em>"what <strong>is</strong> this thing?"</em> — but gameplay keeps asking <em>"what does this thing <strong>have</strong>?"</em> Can it move? Can it be steered? Does it bounce? Those are checkboxes, not ancestry.</p>
+</section>
+
+<!-- ================= 02 THE FLIP ================= -->
+<section id="flip">
+  <span class="eyebrow">02 <b>·</b> the idea</span>
+  <h2>Tip the objects 90° — your game is a table</h2>
+  <p>Take the objects and rotate them: every <strong>field becomes a column</strong>, every <strong>instance becomes a row</strong>, and every <strong>method becomes homeless</strong>. On purpose — behavior moves out of the objects entirely.</p>
+
+  <figure class="fig">
+    <div class="flip">
+      <div>
+        <div class="objcard">
+          <div class="title">class Ball</div>
+          <div><span style="color:var(--c-pos)">x, y</span> · <span style="color:var(--c-vel)">vx, vy</span></div>
+          <div class="dead">update()</div>
+          <div class="dead">draw()</div>
+        </div>
+        <div class="objcard">
+          <div class="title">class Paddle</div>
+          <div><span style="color:var(--c-pos)">x, y</span> · <span style="color:var(--c-pad)">side</span></div>
+          <div class="dead">update()</div>
+          <div class="dead">draw()</div>
+        </div>
+      </div>
+      <div class="flip-arrow">→</div>
+      <div>
+        <div class="tablewrap">
+        <table class="regtable">
+          <tr>
+            <th></th>
+            <th><span class="chip pos">position</span></th>
+            <th><span class="chip vel">velocity</span></th>
+            <th><span class="chip pad">paddle</span></th>
+            <th><span class="chip ball">ball</span></th>
+          </tr>
+          <tr><td class="rowhead"><span class="eid">#1</span></td><td class="val" style="--cc:var(--c-pos)">x 16 · y 115</td><td class="empty">—</td><td class="val" style="--cc:var(--c-pad)">left</td><td class="empty">—</td></tr>
+          <tr><td class="rowhead"><span class="eid">#2</span></td><td class="val" style="--cc:var(--c-pos)">x 456 · y 115</td><td class="empty">—</td><td class="val" style="--cc:var(--c-pad)">right</td><td class="empty">—</td></tr>
+          <tr><td class="rowhead"><span class="eid">#3</span></td><td class="val" style="--cc:var(--c-pos)">x 240 · y 135</td><td class="val" style="--cc:var(--c-vel)">vx 210 · vy −60</td><td class="empty">—</td><td class="val" style="--cc:var(--c-ball)">✓</td></tr>
+        </table>
+        </div>
+        <div class="homeless">
+          <span class="mono" style="color:var(--muted)">the methods become:</span>
+          <span class="sys">MovementSystem</span><span class="sys">RenderSystem</span>
+        </div>
+      </div>
+    </div>
+    <figcaption>the thing that owns this table is called the <b>registry</b>. an entity's "identity" is nothing but its row number.</figcaption>
+  </figure>
+
+  <p>Notice what happened to <code>SteerableBall</code>: it's not a new class. It's just a row that has <span class="chip ball">ball</span> <em>and</em> a steering component. The wall from section 01 isn't climbed — it never existed.</p>
+</section>
+
+<!-- ================= 03 POKE IT ================= -->
+<section id="poke">
+  <span class="eyebrow">03 <b>·</b> hands on</span>
+  <h2>Poke the registry</h2>
+  <p>This is a live registry. <strong>Click any cell</strong> to attach or detach a component. Spawn entities, destroy them, and run queries against whatever you've built.</p>
+
+  <div class="fig playground">
+    <div class="pg-grid" id="pg-grid"></div>
+    <div class="querybar">
+      <button class="btn primary" id="pg-spawn">+ spawn entity</button>
+      <span class="mono" style="color:var(--muted); margin-left:auto">run a query:</span>
+      <button class="btn q" data-q="position">query("position")</button>
+      <button class="btn q" data-q="position,velocity">query("position","velocity")</button>
+      <button class="btn q" data-q="velocity,paddle">query("velocity","paddle")</button>
+    </div>
+    <div class="qresult" id="pg-result"></div>
+    <div class="pg-status" id="pg-status">the registry holds no logic — it only remembers who has what.</div>
+  </div>
+
+  <ul class="try">
+    <li>Run <b>query("position","velocity")</b>, then click velocity cells on and off — watch rows enter and leave the result <em>live</em>. A query is just "rows where all these columns are filled".</li>
+    <li><b>query("velocity","paddle")</b> is probably empty. Give a paddle a velocity — congratulations, you invented ice physics without writing a class.</li>
+    <li>Destroy an entity (✕). Destruction is <em>forgetting</em>: every store drops that key. There is no object to delete, and the number is never reused.</li>
+  </ul>
+</section>
+
+<!-- ================= 04 SYSTEMS / LIVE PONG ================= -->
+<section id="systems">
+  <span class="eyebrow">04 <b>·</b> behavior</span>
+  <h2>Systems sweep the table — live Pong, in the open</h2>
+  <p>A system is a plain function with a standing appointment: <em>"every frame, hand me every entity that has all of my components, and I'll do my one job."</em> Below, two AI paddles play Pong — and on the right you're looking at the <strong>entire game state</strong>, updating in real time. There is nothing else. No objects hiding anywhere.</p>
+
+  <div class="fig demo-shell">
+    <div class="demo-grid">
+      <div class="court-wrap">
+        <canvas id="court" width="960" height="540" aria-label="Pong game rendered from the registry"></canvas>
+        <div class="transport">
+          <button class="btn primary" id="d-playpause">⏸ pause</button>
+          <button class="btn" id="d-step">step system ▸</button>
+          <button class="btn" id="d-ball">+ ball <span style="opacity:.6">(B)</span></button>
+          <button class="btn" id="d-freeze">steal a velocity</button>
+          <button class="btn" id="d-unfreeze">give it back</button>
+          <button class="btn" id="d-reset">reset</button>
+        </div>
+        <div class="syslist" id="d-systems"></div>
+        <div class="demo-status" id="d-status">each checkbox removes one system from the frame loop. the others never notice.</div>
+      </div>
+      <div class="regpanel">
+        <h3>the registry · live</h3>
+        <div class="tablewrap">
+          <table class="regtable" id="demo-table"></table>
+        </div>
+        <p class="caption">this table isn't a debug view of the game — it <b>is</b> the game. the canvas is a drawing <em>of</em> this table.</p>
+      </div>
+    </div>
+  </div>
+
+  <ul class="try">
+    <li>Uncheck <b>MovementSystem</b>. Everything freezes — but the table shows positions and velocities intact. Data and behavior are separate lives.</li>
+    <li>Uncheck <b>RenderSystem</b>. The court goes blank, the table keeps ticking. Drawing is not special: it's just one more job over the same rows.</li>
+    <li>Press <b>+ ball</b> a few times. A new ball is one <code>spawn()</code> — no system needed to be told. Their queries simply start matching one more row.</li>
+    <li><b>steal a velocity</b> removes one ball's <span class="chip vel">velocity</span> component. MovementSystem stops seeing it mid-flight — behavior changed by <em>editing data</em>, not code.</li>
+    <li>Pause and press <b>step system ▸</b> repeatedly: watch one frame happen in slow motion, system by system, and see which rows each one touches.</li>
+  </ul>
+</section>
+
+<!-- ================= 05 WHY ================= -->
+<section id="why">
+  <span class="eyebrow">05 <b>·</b> the payoff</span>
+  <h2>Why engines keep reinventing this</h2>
+  <div class="why">
+    <div class="card">
+      <h3>Behavior is a checkbox</h3>
+      <p>A new ability = a new component + one system that queries it. No tree surgery, no refactor. Any entity can have any mix — designers compose, programmers write systems.</p>
+      <div class="art stackart">
+        <span class="chip ball">ball</span>
+        <span class="plus">+ <span class="chip" style="--cc:var(--c-scr)">steerable</span></span>
+        <span class="mono" style="color:var(--muted); font-size:.75rem">= the power-up from section 01</span>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Systems don't know each other</h3>
+      <p>MovementSystem never calls BounceSystem. They only share the table. You just proved it above: delete any system and the rest keep working. Debugging means reading rows, not chasing call stacks.</p>
+      <div class="art">
+        <span class="sys">Movement</span> <span class="mono" style="color:var(--muted)">→</span>
+        <span class="chip pos">position</span> <span class="chip vel">velocity</span>
+        <span class="mono" style="color:var(--muted)">←</span> <span class="sys">Bounce</span>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Rows the CPU loves</h3>
+      <p>All positions live together, all velocities live together. Tight loops over same-shaped data prefetch beautifully — the data-oriented layout from week 1. This is why Overwatch and Unity DOTS bother.</p>
+      <div class="art mem">
+        <span class="label">objects scattered on the heap</span>
+        <div class="strip">
+          <span class="cellu p"></span><span class="cellu"></span><span class="cellu v"></span><span class="cellu"></span><span class="cellu"></span><span class="cellu d"></span><span class="cellu p"></span><span class="cellu"></span><span class="cellu b"></span><span class="cellu"></span><span class="cellu v"></span><span class="cellu"></span><span class="cellu"></span><span class="cellu p"></span><span class="cellu"></span><span class="cellu d"></span>
+        </div>
+        <span class="label">one component store — every position, back to back</span>
+        <div class="strip">
+          <span class="sweep"></span>
+          <span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span><span class="cellu p"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p style="margin-top:26px">And the honest counterweight: ECS is a tool, not a religion. For UI, tools, and tree-shaped problems it can be the <em>wrong</em> shape — Godot says so <a href="https://godotengine.org/article/why-isnt-godot-ecs-based-game-engine/">at length</a>, and lesson&nbsp;07's hybrid Pong is the peace treaty.</p>
+</section>
+
+<!-- ================= 06 YOURS ================= -->
+<section id="yours">
+  <span class="eyebrow">06 <b>·</b> back to code</span>
+  <h2>You already own one</h2>
+  <p>You built this exact machine in lesson 02. The whole registry is ~100 lines of Lua — here is its beating heart, <code>src/ecs/Registry.lua</code>:</p>
+
+<pre><code><span class="c">-- one table per component TYPE, indexed by entity:</span>
+<span class="c">-- components = { position = { [1]={x=30,y=230}, [3]={x=473,y=263} }, ... }</span>
+
+<span class="k">function</span> Registry:<span class="f">spawn</span>(components)
+    <span class="k">local</span> entity = self.nextEntity          <span class="c">-- an entity is just a number</span>
+    self.nextEntity = entity + 1
+    <span class="k">for</span> name, data <span class="k">in</span> pairs(components) <span class="k">do</span>
+        self:add(entity, name, data)
+    <span class="k">end</span>
+    <span class="k">return</span> entity
+<span class="k">end</span>
+
+<span class="k">function</span> Registry:<span class="f">query</span>(...)                <span class="c">-- "every row where ALL columns are filled"</span>
+    <span class="k">local</span> names = { ... }
+    <span class="k">local</span> result = {}
+    <span class="k">for</span> entity <span class="k">in</span> pairs(self.components[names[1]] <span class="k">or</span> {}) <span class="k">do</span>
+        <span class="k">local</span> ok = <span class="k">true</span>
+        <span class="k">for</span> i = 2, #names <span class="k">do</span>
+            <span class="k">local</span> store = self.components[names[i]]
+            <span class="k">if</span> <span class="k">not</span> store <span class="k">or</span> store[entity] == <span class="k">nil</span> <span class="k">then</span> ok = <span class="k">false</span>; <span class="k">break</span> <span class="k">end</span>
+        <span class="k">end</span>
+        <span class="k">if</span> ok <span class="k">then</span> result[#result + 1] = entity <span class="k">end</span>
+    <span class="k">end</span>
+    table.sort(result)
+    <span class="k">return</span> result
+<span class="k">end</span></code></pre>
+
+  <p>Run the two Pongs side by side and <code>diff</code> them — same game, opposite philosophy:</p>
+  <p>
+    <span class="run">love lesson/pong/02-inheritance</span>
+    <span class="run">love lesson/pong/06-ecs</span>
+  </p>
+  <p>In lesson 02's ECS Pong, press <strong>B</strong>. Keep pressing B. That's this page's <em>+ ball</em> button — now you know why it costs one line.</p>
+
+  <h3 style="font: 700 0.8rem/1 var(--mono); letter-spacing:.1em; color:var(--muted); margin-top:38px; text-transform:lowercase">the same idea in the wild</h3>
+  <p style="font-size:.95rem">
+    <a href="https://github.com/skypjack/entt">entt</a> (C++ — our registry copies its API) ·
+    Unity <a href="https://unity.com/dots">DOTS</a> ·
+    <a href="https://bevy.org/">Bevy</a> (Rust, ECS-first) ·
+    the assigned <a href="https://www.youtube.com/watch?v=W3aieHjyNvw">Overwatch GDC talk</a> — a shipped AAA game explaining these exact trade-offs.
+  </p>
+</section>
+
+<!-- ================= FOOTER ================= -->
+<footer>
+  <div class="mantra">
+    <div class="line"><span class="eid big" style="min-width:2.4em;height:2.4em">#42</span> <span class="is">an entity is</span> a number.</div>
+    <div class="line"><span class="chip pos" style="font-size:.9rem">position</span> <span class="is">a component is</span> data.</div>
+    <div class="line"><span class="sys" style="font-size:.9rem">MovementSystem</span> <span class="is">a system is</span> a function.</div>
+  </div>
+  <p class="next">That's the whole trick. Next: <code>love lesson/pong/07-hybrid</code> — where ECS, events and a state machine learn to share an apartment.</p>
+</footer>
+
+</main>
+
+<script>
+"use strict";
+/* ============================================================
+   A tiny ECS — the same API as src/ecs/Registry.lua, in JS.
+   ============================================================ */
+function makeRegistry() {
+  return {
+    nextEntity: 1,
+    components: {},          // name -> { [entity]: data }
+    spawn(comps) {
+      const e = this.nextEntity++;
+      for (const [name, data] of Object.entries(comps)) this.add(e, name, data);
+      return e;
+    },
+    add(e, name, data) {
+      (this.components[name] ??= {})[e] = data;
+    },
+    remove(e, name) {
+      const store = this.components[name];
+      if (store) delete store[e];
+    },
+    get(e, name) {
+      return this.components[name]?.[e];
+    },
+    destroy(e) {
+      for (const store of Object.values(this.components)) delete store[e];
+    },
+    query(...names) {
+      const first = this.components[names[0]] ?? {};
+      const out = [];
+      outer: for (const key of Object.keys(first)) {
+        const e = Number(key);
+        for (let i = 1; i < names.length; i++) {
+          const store = this.components[names[i]];
+          if (!store || store[e] === undefined) continue outer;
+        }
+        out.push(e);
+      }
+      return out.sort((a, b) => a - b);
+    },
+    entities() {
+      const ids = new Set();
+      for (const store of Object.values(this.components))
+        for (const key of Object.keys(store)) ids.add(Number(key));
+      return [...ids].sort((a, b) => a - b);
+    },
+  };
+}
+
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ============================================================
+   SECTION 03 — the registry playground
+   ============================================================ */
+(function playground() {
+  const COMPS = [
+    { key: "position", cls: "pos",  sample: () => ({ x: 240, y: 135 }),   fmt: d => `x ${d.x} · y ${d.y}` },
+    { key: "velocity", cls: "vel",  sample: () => ({ vx: 180, vy: -60 }), fmt: d => `vx ${d.vx} · vy ${d.vy}` },
+    { key: "drawable", cls: "drw",  sample: () => ({}),                   fmt: () => "✓" },
+    { key: "paddle",   cls: "pad",  sample: () => ({ side: "left" }),     fmt: d => d.side },
+    { key: "ball",     cls: "ball", sample: () => ({}),                   fmt: () => "✓" },
+  ];
+  const MAX_ROWS = 7;
+  const reg = makeRegistry();
+  // the playground keeps its own row list: a freshly spawned entity has no
+  // components yet, so no store remembers it — but the UI still shows it.
+  const rows = [];
+  rows.push(reg.spawn({ position: { x: 16, y: 115 },  drawable: {}, paddle: { side: "left" } }));
+  rows.push(reg.spawn({ position: { x: 456, y: 115 }, drawable: {}, paddle: { side: "right" } }));
+  rows.push(reg.spawn({ position: { x: 240, y: 135 }, velocity: { vx: 210, vy: -60 }, drawable: {}, ball: {} }));
+
+  const grid = document.getElementById("pg-grid");
+  const resultEl = document.getElementById("pg-result");
+  const statusEl = document.getElementById("pg-status");
+  let activeQuery = null;
+  let bornEntity = null;
+
+  function say(msg) { statusEl.textContent = msg; }
+
+  function render() {
+    grid.innerHTML = "";
+    const header = document.createElement("div");
+    header.className = "pg-row header";
+    header.innerHTML = `<div></div>` + COMPS.map(c =>
+      `<div><span class="chip ${c.cls}">${c.key}</span></div>`).join("") + `<div></div>`;
+    grid.appendChild(header);
+
+    for (const e of rows) {
+      const row = document.createElement("div");
+      row.className = "pg-row";
+      if (e === bornEntity) row.classList.add("born");
+      const head = document.createElement("div");
+      head.className = "pg-rowhead";
+      head.innerHTML = `<span class="eid">#${e}</span>`;
+      row.appendChild(head);
+
+      for (const c of COMPS) {
+        const data = reg.get(e, c.key);
+        const cell = document.createElement("button");
+        cell.type = "button";
+        cell.style.setProperty("--cc", `var(--c-${c.cls})`);
+        if (data !== undefined) {
+          cell.className = "pg-cell on";
+          cell.innerHTML = `${c.key}<span class="data">${c.fmt(data)}</span>`;
+          cell.title = `detach ${c.key} from entity ${e}`;
+          cell.onclick = () => {
+            reg.remove(e, c.key);
+            say(`registry.components.${c.key}[${e}] = nil — entity #${e} no longer has ${c.key}.`);
+            render();
+          };
+        } else {
+          cell.className = "pg-cell off";
+          cell.textContent = `+ ${c.key}`;
+          cell.title = `attach ${c.key} to entity ${e}`;
+          cell.onclick = () => {
+            reg.add(e, c.key, c.sample());
+            say(`registry:add(${e}, "${c.key}", {...}) — one table insert. no class changed.`);
+            render();
+          };
+        }
+        row.appendChild(cell);
+      }
+
+      const kill = document.createElement("button");
+      kill.type = "button";
+      kill.className = "pg-kill";
+      kill.textContent = "✕";
+      kill.title = `destroy entity ${e}`;
+      kill.onclick = () => {
+        const done = () => {
+          reg.destroy(e);
+          rows.splice(rows.indexOf(e), 1);
+          say(`registry:destroy(${e}) — every store forgot key ${e}. that's all destruction is. #${e} is never reused.`);
+          render();
+        };
+        if (reducedMotion) return done();
+        row.classList.add("dying");
+        row.addEventListener("animationend", done, { once: true });
+      };
+      row.appendChild(kill);
+      grid.appendChild(row);
+    }
+    bornEntity = null;
+    applyQuery();
+  }
+
+  function applyQuery() {
+    const rowEls = [...grid.querySelectorAll(".pg-row:not(.header)")];
+    rowEls.forEach(r => r.classList.remove("matched", "dimmed"));
+    if (!activeQuery) { resultEl.textContent = ""; return; }
+    const matches = reg.query(...activeQuery);
+    rowEls.forEach((r, i) => {
+      if (matches.includes(rows[i])) r.classList.add("matched");
+      else r.classList.add("dimmed");
+    });
+    const label = activeQuery.map(q => `"${q}"`).join(", ");
+    resultEl.textContent = matches.length
+      ? `query(${label}) → { ${matches.map(m => "#" + m).join(", ")} }`
+      : `query(${label}) → ∅  (no entity has all of these)`;
+  }
+
+  document.getElementById("pg-spawn").onclick = () => {
+    if (rows.length >= MAX_ROWS) {
+      say("that's plenty for a demo — a real registry would happily keep going.");
+      return;
+    }
+    bornEntity = reg.spawn({});
+    rows.push(bornEntity);
+    say(`registry:spawn({}) → ${bornEntity}. a freshly minted number. it "exists", but no store remembers it yet — give it components.`);
+    render();
+  };
+
+  document.querySelectorAll(".btn.q").forEach(btn => {
+    btn.onclick = () => {
+      const q = btn.dataset.q.split(",");
+      const same = activeQuery && activeQuery.join() === q.join();
+      activeQuery = same ? null : q;
+      document.querySelectorAll(".btn.q").forEach(b => b.classList.toggle("active", b === btn && !same));
+      applyQuery();
+      if (activeQuery) say("now toggle cells — the result updates live. a query is a filter, not a list you maintain.");
+    };
+  });
+
+  render();
+})();
+
+/* ============================================================
+   SECTION 04 — live Pong + live registry table
+   ============================================================ */
+(function demo() {
+  const W = 480, H = 270;             // logical court size
+  const MAX_BALLS = 8;
+  const canvas = document.getElementById("court");
+  const ctx = canvas.getContext("2d");
+  const statusEl = document.getElementById("d-status");
+  const say = (html) => { statusEl.innerHTML = html; };
+
+  let reg, simTime;
+
+  function serveComponents(dir) {
+    const angle = (Math.random() * 60 - 30) * Math.PI / 180;
+    return {
+      position: { x: W / 2 - 4, y: H / 2 - 4 },
+      velocity: { vx: Math.cos(angle) * 210 * dir, vy: Math.sin(angle) * 210 },
+      size: { w: 8, h: 8 },
+      ball: {}, drawable: {},
+    };
+  }
+
+  function build() {
+    reg = makeRegistry();
+    simTime = 0;
+    reg.spawn({ position: { x: 16, y: 115 },  size: { w: 8, h: 44 }, paddle: { side: "left" },  drawable: {} });
+    reg.spawn({ position: { x: 456, y: 115 }, size: { w: 8, h: 44 }, paddle: { side: "right" }, drawable: {} });
+    reg.spawn(serveComponents(Math.random() < 0.5 ? 1 : -1));
+    reg.spawn({ score: { left: 0, right: 0 } });
+  }
+  build();
+
+  /* ---------- the systems ---------- */
+  function colors() {
+    return {
+      ink: cssVar("--ink"), muted: cssVar("--muted"),
+      ball: cssVar("--c-ball"), line: cssVar("--line"),
+    };
+  }
+
+  const systems = [
+    {
+      name: "PaddleAISystem", query: ["paddle", "position", "size"], enabled: true,
+      fn(dt) {
+        for (const e of reg.query("paddle", "position", "size")) {
+          const pos = reg.get(e, "position"), size = reg.get(e, "size");
+          const side = reg.get(e, "paddle").side;
+          // chase the nearest ball heading our way; wobble so it can lose
+          let target = H / 2, best = Infinity;
+          for (const b of reg.query("ball", "position", "velocity")) {
+            const bp = reg.get(b, "position"), bv = reg.get(b, "velocity");
+            const coming = side === "left" ? bv.vx < 0 : bv.vx > 0;
+            const dist = Math.abs(bp.x - pos.x);
+            if (coming && dist < best) { best = dist; target = bp.y + 4; }
+          }
+          target += Math.sin(simTime * 1.7 + (side === "left" ? 0 : 2.4)) * 16;
+          const center = pos.y + size.h / 2;
+          const dy = target - center;
+          const speed = 150;
+          if (Math.abs(dy) > 4) pos.y += Math.sign(dy) * Math.min(Math.abs(dy), speed * dt);
+          pos.y = Math.max(0, Math.min(H - size.h, pos.y));
+        }
+      },
+    },
+    {
+      name: "MovementSystem", query: ["position", "velocity"], enabled: true,
+      fn(dt) {
+        for (const e of reg.query("position", "velocity")) {
+          const p = reg.get(e, "position"), v = reg.get(e, "velocity");
+          p.x += v.vx * dt; p.y += v.vy * dt;
+        }
+      },
+    },
+    {
+      name: "BounceWallsSystem", query: ["ball", "position", "velocity", "size"], enabled: true,
+      fn() {
+        for (const e of reg.query("ball", "position", "velocity", "size")) {
+          const p = reg.get(e, "position"), v = reg.get(e, "velocity"), s = reg.get(e, "size");
+          if (p.y < 0)          { p.y = 0;          v.vy =  Math.abs(v.vy); }
+          if (p.y + s.h > H)    { p.y = H - s.h;    v.vy = -Math.abs(v.vy); }
+        }
+      },
+    },
+    {
+      name: "PaddleHitsSystem", query: ["ball", "position", "velocity", "size"], enabled: true,
+      fn() {
+        const paddles = reg.query("paddle", "position", "size");
+        for (const e of reg.query("ball", "position", "velocity", "size")) {
+          const p = reg.get(e, "position"), v = reg.get(e, "velocity"), s = reg.get(e, "size");
+          for (const pd of paddles) {
+            const pp = reg.get(pd, "position"), ps = reg.get(pd, "size");
+            const overlap = p.x < pp.x + ps.w && p.x + s.w > pp.x &&
+                            p.y < pp.y + ps.h && p.y + s.h > pp.y;
+            if (!overlap) continue;
+            const movingInto = reg.get(pd, "paddle").side === "left" ? v.vx < 0 : v.vx > 0;
+            if (!movingInto) continue;
+            v.vx = -v.vx * 1.04;
+            v.vx = Math.sign(v.vx) * Math.min(Math.abs(v.vx), 420);
+            v.vy += ((p.y + s.h / 2) - (pp.y + ps.h / 2)) * 3;
+            p.x = v.vx > 0 ? pp.x + ps.w : pp.x - s.w;
+          }
+        }
+      },
+    },
+    {
+      name: "ScoringSystem", query: ["ball", "position"], enabled: true,
+      fn() {
+        const scoreEntities = reg.query("score");
+        const score = scoreEntities.length ? reg.get(scoreEntities[0], "score") : null;
+        for (const e of reg.query("ball", "position")) {
+          const p = reg.get(e, "position");
+          if (p.x < -16 || p.x > W + 16) {
+            if (score) { p.x < 0 ? score.right++ : score.left++; }
+            const dir = p.x < 0 ? 1 : -1;
+            reg.destroy(e);                       // destruction is forgetting…
+            reg.spawn(serveComponents(dir));      // …and a serve is one spawn
+          }
+        }
+      },
+    },
+    {
+      name: "RenderSystem", query: ["drawable", "position", "size"], enabled: true,
+      fn() {
+        drawCourt();
+        const c = colors();
+        for (const e of reg.query("drawable", "position", "size")) {
+          const p = reg.get(e, "position"), s = reg.get(e, "size");
+          ctx.fillStyle = reg.get(e, "ball") ? c.ball : c.ink;
+          ctx.fillRect(p.x * SCALE, p.y * SCALE, s.w * SCALE, s.h * SCALE);
+        }
+        const scoreEntities = reg.query("score");
+        if (scoreEntities.length) {
+          const sc = reg.get(scoreEntities[0], "score");
+          ctx.fillStyle = c.muted;
+          ctx.font = `700 ${13 * SCALE}px monospace`;
+          ctx.textAlign = "center";
+          ctx.fillText(`${sc.left}   ${sc.right}`, (W / 2) * SCALE, 20 * SCALE);
+        }
+      },
+    },
+  ];
+
+  const SCALE = canvas.width / W;
+  function drawCourt() {
+    const c = colors();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = c.line; ctx.lineWidth = 2 * SCALE * 0.5;
+    ctx.setLineDash([6 * SCALE, 6 * SCALE]);
+    ctx.beginPath();
+    ctx.moveTo(canvas.width / 2, 0); ctx.lineTo(canvas.width / 2, canvas.height);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  /* ---------- systems UI ---------- */
+  const sysList = document.getElementById("d-systems");
+  const CHIP_CLS = { position: "pos", velocity: "vel", drawable: "drw", paddle: "pad", ball: "ball", size: "size", score: "scr" };
+  systems.forEach(sys => {
+    const row = document.createElement("label");
+    row.className = "sysrow";
+    row.innerHTML =
+      `<input type="checkbox" checked>` +
+      `<span class="sys">${sys.name}</span>` +
+      `<span class="q">${sys.query.map(q => `<span class="chip ${CHIP_CLS[q]}">${q}</span>`).join("")}</span>`;
+    row.querySelector("input").onchange = (ev) => {
+      sys.enabled = ev.target.checked;
+      row.classList.toggle("off", !sys.enabled);
+      say(sys.enabled
+        ? `<b>${sys.name}</b> is back. it never knew it was gone — it just queries the table again.`
+        : `<b>${sys.name}</b> removed from the loop. nothing else breaks: no other system ever called it.`);
+    };
+    sys.row = row;
+    sysList.appendChild(row);
+  });
+
+  /* ---------- live table ---------- */
+  const table = document.getElementById("demo-table");
+  const TABLE_COMPS = [
+    { key: "position", cls: "pos",  fmt: d => `${Math.round(d.x)},${Math.round(d.y)}` },
+    { key: "velocity", cls: "vel",  fmt: d => `${Math.round(d.vx)},${Math.round(d.vy)}` },
+    { key: "size",     cls: "size", fmt: d => `${d.w}×${d.h}` },
+    { key: "paddle",   cls: "pad",  fmt: d => d.side },
+    { key: "ball",     cls: "ball", fmt: () => "✓" },
+    { key: "drawable", cls: "drw",  fmt: () => "✓" },
+    { key: "score",    cls: "scr",  fmt: d => `${d.left}–${d.right}` },
+  ];
+  let tableIds = "";
+  let rowByEntity = new Map();
+  let touchedRows = new Set();
+
+  function rebuildTable(ids) {
+    rowByEntity = new Map();
+    table.innerHTML =
+      `<tr><th></th>${TABLE_COMPS.map(c => `<th><span class="chip ${c.cls}">${c.key}</span></th>`).join("")}</tr>`;
+    for (const e of ids) {
+      const tr = table.insertRow();
+      tr.innerHTML = `<td class="rowhead"><span class="eid">#${e}</span></td>` +
+        TABLE_COMPS.map(() => `<td></td>`).join("");
+      if (tableIds !== "" ) tr.classList.add("born");
+      rowByEntity.set(e, tr);
+    }
+  }
+
+  function updateTable() {
+    const ids = reg.entities();
+    const key = ids.join(",");
+    if (key !== tableIds) { rebuildTable(ids); tableIds = key; }
+    for (const e of ids) {
+      const tr = rowByEntity.get(e);
+      tr.classList.toggle("touched", touchedRows.has(e));
+      TABLE_COMPS.forEach((c, i) => {
+        const td = tr.cells[i + 1];
+        const data = reg.get(e, c.key);
+        if (data === undefined) {
+          if (td.className !== "empty") { td.className = "empty"; td.style.removeProperty("--cc"); }
+          if (td.textContent !== "—") td.textContent = "—";
+        } else {
+          if (td.className !== "val") { td.className = "val"; td.style.setProperty("--cc", `var(--c-${c.cls})`); }
+          const text = c.fmt(data);
+          if (td.textContent !== text) td.textContent = text;
+        }
+      });
+    }
+  }
+  updateTable();
+  setInterval(() => { if (!document.hidden) updateTable(); }, 140);
+
+  /* ---------- frame loop + stepping ---------- */
+  let paused = reducedMotion;      // considerate default: no auto-motion if the OS asked
+  let stepIndex = 0, stepFrame = 1;
+  const DT = 1 / 60;
+  const playBtn = document.getElementById("d-playpause");
+  playBtn.textContent = paused ? "▶ play" : "⏸ pause";
+
+  function setPaused(v) {
+    paused = v;
+    playBtn.textContent = paused ? "▶ play" : "⏸ pause";
+    if (!paused) { stepIndex = 0; touchedRows.clear(); systems.forEach(s => s.row.classList.remove("firing")); }
+  }
+  playBtn.onclick = () => setPaused(!paused);
+
+  document.getElementById("d-step").onclick = () => {
+    if (!paused) setPaused(true);
+    const sys = systems[stepIndex];
+    systems.forEach(s => s.row.classList.remove("firing"));
+    touchedRows = new Set(reg.query(...sys.query));
+    if (sys.enabled) {
+      sys.row.classList.add("firing");
+      simTime += DT / systems.length;
+      sys.fn(DT);
+      say(`frame ${stepFrame} · <b>${sys.name}</b> ran over query(${sys.query.join(", ")}) → touched ${touchedRows.size} row${touchedRows.size === 1 ? "" : "s"} (highlighted). nothing else was read or written.`);
+    } else {
+      touchedRows.clear();
+      say(`frame ${stepFrame} · <b>${sys.name}</b> is unchecked — skipped.`);
+    }
+    updateTable();
+    stepIndex = (stepIndex + 1) % systems.length;
+    if (stepIndex === 0) stepFrame++;
+  };
+
+  document.getElementById("d-ball").onclick = spawnBall;
+  function spawnBall() {
+    if (reg.query("ball").length >= MAX_BALLS) {
+      say(`${MAX_BALLS} balls is enough for one table. (the registry itself wouldn't mind more.)`);
+      return;
+    }
+    const e = reg.spawn(serveComponents(Math.random() < 0.5 ? 1 : -1));
+    say(`registry:spawn({...}) → <b>#${e}</b>. one line. every system's query simply matches one more row now — none of them were told.`);
+    updateTable();
+  }
+  addEventListener("keydown", (ev) => {
+    if (ev.key.toLowerCase() === "b" && !ev.metaKey && !ev.ctrlKey && !ev.altKey
+        && document.activeElement?.tagName !== "INPUT") {
+      const r = canvas.getBoundingClientRect();
+      if (r.bottom > 0 && r.top < innerHeight) spawnBall();
+    }
+  });
+
+  document.getElementById("d-freeze").onclick = () => {
+    const movers = reg.query("ball", "velocity");
+    if (!movers.length) { say("every ball is already frozen — give one its velocity back first."); return; }
+    const e = movers[movers.length - 1];
+    reg.remove(e, "velocity");
+    say(`removed <b>velocity</b> from ball <b>#${e}</b>, mid-flight. MovementSystem's query no longer matches it — it hangs in the air. behavior changed by editing <em>data</em>.`);
+    updateTable();
+  };
+  document.getElementById("d-unfreeze").onclick = () => {
+    const frozen = reg.query("ball").filter(e => reg.get(e, "velocity") === undefined);
+    if (!frozen.length) { say("no frozen balls. steal a velocity first."); return; }
+    const e = frozen[0];
+    const angle = (Math.random() * 60 - 30) * Math.PI / 180;
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    reg.add(e, "velocity", { vx: Math.cos(angle) * 210 * dir, vy: Math.sin(angle) * 210 });
+    say(`gave ball <b>#${e}</b> a fresh <b>velocity</b> component. MovementSystem sees it again instantly — queries are filters, not registrations.`);
+    updateTable();
+  };
+  document.getElementById("d-reset").onclick = () => {
+    build(); tableIds = ""; touchedRows.clear(); stepIndex = 0; stepFrame = 1;
+    systems.forEach(s => { s.enabled = true; s.row.classList.remove("firing", "off"); s.row.querySelector("input").checked = true; });
+    updateTable();
+    drawCourt();
+    say("fresh registry: 2 paddles, 1 ball, 1 score row. that's the entire game.");
+  };
+
+  let last = performance.now();
+  function loop(now) {
+    requestAnimationFrame(loop);
+    const dt = Math.min((now - last) / 1000, 1 / 30);
+    last = now;
+    if (paused || document.hidden) return;
+    simTime += dt;
+    for (const sys of systems) if (sys.enabled) sys.fn(dt);
+    if (!systems[5].enabled) drawCourt();   // render is off: show the empty court, honestly
+  }
+  // draw one full frame so the court isn't blank when starting paused
+  for (const sys of systems) sys.fn(0);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

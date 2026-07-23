@@ -86,6 +86,40 @@ function Registry:query(...)
     return result
 end
 
+-- Iterate entities AND their components in one go:
+--   for entity, pos, vel in registry:each("position", "velocity") do ... end
+--
+-- This is a closure-based iterator (the same protocol pairs/ipairs use):
+-- the generic for calls the returned function once per step, and stops
+-- when it returns nil. The entity list is a snapshot from query(), so
+-- spawning/destroying inside the loop is safe; entities destroyed
+-- mid-loop are skipped.
+function Registry:each(...)
+    local names = { ... }
+    local entities = self:query(...)
+    local i = 0
+    return function()
+        while true do
+            i = i + 1
+            local entity = entities[i]
+            if not entity then return nil end
+            local values, alive = {}, true
+            for k, name in ipairs(names) do
+                values[k] = self.components[name][entity]
+                if values[k] == nil then -- destroyed since query(): skip it
+                    alive = false
+                    break
+                end
+            end
+            if alive then
+                -- LÖVE is LuaJIT (Lua 5.1): `unpack`, not `table.unpack`.
+                -- Explicit bounds, because values could have nil holes.
+                return entity, unpack(values, 1, #names)
+            end
+        end
+    end
+end
+
 -- Every entity that exists, in a stable order. Nothing in the GAME needs
 -- this — systems always know which components they want. It exists for
 -- TOOLS: the debug inspector asks "what's here?" without knowing any

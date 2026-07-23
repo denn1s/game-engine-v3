@@ -13,15 +13,8 @@ end
 function PaddleHitsSystem.update(scene, dt)
     local registry = scene.registry
 
-    for _, ballEntity in ipairs(registry:query("ball", "position", "size", "velocity")) do
-        local bp = registry:get(ballEntity, "position")
-        local bs = registry:get(ballEntity, "size")
-        local bv = registry:get(ballEntity, "velocity")
-
-        for _, paddleEntity in ipairs(registry:query("paddle", "position", "size")) do
-            local pp = registry:get(paddleEntity, "position")
-            local ps = registry:get(paddleEntity, "size")
-
+    for _, bp, bs, bv in registry:each("position", "size", "velocity", "ball") do
+        for _, pp, ps in registry:each("position", "size", "paddle") do
             if aabb(bp.x, bp.y, bs.w, bs.h, pp.x, pp.y, ps.w, ps.h) then
                 -- push the ball out so it can't get stuck inside the paddle
                 if bv.vx > 0 then
