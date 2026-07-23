@@ -1,190 +1,172 @@
-# Lesson 04 — Debug tools: the entity inspector
+# Lesson 04.5 — The editor window: the game in a viewport
 
-> PIA week 5 · Branch `04-DebugTools` · Previous: `03-Scenes`
-
-```sh
-love . --debug     # start with the inspector open
-love .             # or press F1 in game
-```
-
-**F1** toggles the inspector · **F9** pauses · **F10** steps one frame.
+> PIA week 5 · Branch `04.5-GameViewport` · Previous: `04-DebugTools`
+>
+> **Optional lesson.** Everything after this builds on `04-DebugTools`,
+> not on this branch. Skip it freely; come back when you wonder how Unity
+> puts a running game *inside* the editor.
 
 ```sh
-git diff 03-Scenes..04-DebugTools
+love . --debug     # the editor: big window, game in a viewport
+love .             # the plain game, exactly as in lesson 04 (F1 works)
 ```
 
-## 1. Our first (and only) dependency
+**F1** toggles the tool panels (the viewport stays — it's the game) ·
+**F9** pauses · **F10** steps one frame.
 
-Everything in this course is written from scratch — except this. Today we
-**vendor** a library: [imlove](../imlove), an immediate-mode UI for LÖVE,
-written in pure Lua, whose API deliberately mirrors
-[Dear ImGui](https://github.com/ocornut/imgui) — the tool used for debug UIs
-in a huge share of real engines (and what the C++/Odin people among you
-would use directly).
+```sh
+git diff 04-DebugTools..04.5-GameViewport
+```
 
-Vendoring means: copy `imlove.lua` into `lib/`, commit it, done. No package
-manager, no version drift, and the file is right there when you're curious.
-That's how game studios actually consume small dependencies. Read its README
-before class — integrating a library *from its docs* is the skill being
-practiced; we will not study its internals (building UI is its own lesson,
-later, when your game needs menus and card hands).
+## 1. The one idea: a render target
 
-## 2. Immediate-mode UI, the 5-minute version
+Unity's Game view looks like magic — a whole game running inside a panel —
+but it is one primitive doing all the work: the game doesn't draw to the
+screen, it draws into a **texture** (a *render target*), and the editor UI
+displays that texture like it would display any image.
 
-There are two ways to build UIs:
-
-- **Retained mode** (the DOM, Qt, Unity's UI Toolkit): you *create* widget
-  objects, they persist, you mutate them, and callbacks fire back at you.
-- **Immediate mode** (Dear ImGui, and now imlove): there are no widget
-  objects. Every frame you *call functions* — and the call is the widget:
+LÖVE's render target is `love.graphics.Canvas`:
 
 ```lua
-if imlove.Button("step (F10)") then
-    stepOnce = true
+gameCanvas = love.graphics.newCanvas(960, 540)
+
+love.graphics.setCanvas(gameCanvas) -- everything now lands in the texture
+Game.draw()
+love.graphics.setCanvas()           -- back to the real screen
+```
+
+The draw wrapper in `src/debug/attach.lua` brackets the game's draw with
+exactly that (via `DebugOverlay.beginGameDraw`/`endGameDraw`, no-ops
+outside editor mode) — main.lua doesn't change at all:
+
+```lua
+love.draw = function()
+    DebugOverlay.beginGameDraw() -- editor mode: redirect into the canvas
+    draw()                       -- the wrapped Game.draw
+    DebugOverlay.endGameDraw()   -- back to the real screen
+    DebugOverlay.draw()          -- UI on top (incl. the viewport)
 end
 ```
 
-The button "exists" only because that line runs this frame. State lives in
-*your* variables, not in the UI; the `if` handles the click right where the
-button is declared. For tools that visualize rapidly-changing game state,
-this is dramatically less code — the UI is redeclared from the current truth
-every frame, so it can never be stale. (Sound familiar? Our `RenderSystem`
-redraws the world from the registry every frame. Same philosophy.)
+The scenes keep drawing at 960×540 like they always did, and can't tell
+whether the "screen" is real or a texture inside a bigger window.
 
-The cost: the UI must actually run every frame, and identity needs care —
-two widgets with the same label are the same widget, which is why lists use
-`PushID`/`PopID` (see the entity loop in `DebugOverlay.lua`).
+At least, that was the theory.
 
-## 3. The overlay is engine, not game
+## 2. The first thing the editor did was find a bug
 
-`src/debug/DebugOverlay.lua` is **not a system** and belongs to no scene. It
-sits *next to* the Game, watching whatever `Game.current()` returns, and it
-survives scene switches. Scenes never know it's there. That's the right
-altitude for tools: they observe the game from outside, like a debugger
-observes a process.
-
-And the wiring lives in its own file too: `src/debug/attach.lua` *wraps*
-the LÖVE callbacks that main.lua defined, so main.lua stays pure game
-bootstrap — it never mentions how the overlay hooks in. Self-installing
-tools are the idiomatic LÖVE pattern (lovebird, lurker and lovedebug all
-work this way). Inside the wrappers you'll find the standard imgui
-integration dance:
+The very first `--debug` launch drew PONG's title well right of the
+viewport's center. Nothing in the viewport code was wrong — the *game*
+was. Every system asked the platform for the playfield size:
 
 ```lua
-DebugOverlay.beginFrame(game.current())   -- top of love.update
-if DebugOverlay.shouldUpdate() then       -- the pause gate
-    update(dt)                            -- the wrapped Game.update
+local screenW = love.graphics.getWidth()
+```
+
+and `getWidth()` answers for the **OS window** — 1440 in the editor —
+while the canvas the game actually draws into is 960 wide. Menus centered
+themselves 240px too far right; balls would spawn off-center; paddles
+clamped against a floor that isn't where the screen ends. The assumption
+"the window IS the game" had been in every system since lesson 01. It was
+never wrong before — window and game were always the same 960×540 — so it
+never detonated. The editor made them differ, and the bug walked right
+out. (Same shape as lesson 04's war story: tools don't create these bugs,
+they *reveal* them.)
+
+The fix is `src/Screen.lua`, all of one line of data:
+
+```lua
+return { w = 960, h = 540 }
+```
+
+The game's logical resolution, written down exactly once. `conf.lua` reads
+it to size the real window, every system reads it instead of asking
+`love.graphics`, and the editor reads it to size the canvas. The window
+belongs to the platform; the **resolution belongs to the game**. Unity
+draws the same line: `Screen.width` in game code reports the game's
+resolution, never the editor window's.
+
+## 3. Entering the editor
+
+`--debug` used to just show the overlay; now it calls
+`DebugOverlay.enterEditor()`, which does five small things:
+
+1. grows the OS window to 1.5× the game's resolution,
+2. creates the canvas at `Screen.w × Screen.h`,
+3. repaints the backdrop: the editor's background is gray, so the black
+   belongs to the game — the viewport visibly *owns* its pixels (the
+   canvas clears to black in `beginGameDraw`),
+4. points imlove at its own layout file, `imlove-editor.ini` — positions
+   saved in a 1440-wide editor make no sense in the 960-wide plain game,
+   so the two modes must never share one,
+5. shows the overlay.
+
+There is no way back at runtime, and that's fine: editor vs. game is a
+decision you make when you launch, not a mode to toggle mid-match.
+
+## 4. The viewport is just a widget
+
+imlove grew one widget for this, `Image` — the equivalent of
+`ImGui::Image()`, and the same widget real engines use for their viewports:
+
+```lua
+imlove.SetNextWindowPos((sw - gw) / 2 - pad, (sh - gh) / 2 - pad)
+if imlove.Begin("viewport", nil, { "NoTitleBar", "AlwaysAutoResize" }) then
+    imlove.Image(gameCanvas)
 end
-...
-draw()                                    -- the wrapped Game.draw
-DebugOverlay.draw()                       -- last: UI on top
+imlove.End()
 ```
 
-and every input event asks the overlay first:
+Three details worth reading twice in `DebugOverlay.lua`:
 
-```lua
-love[event] = function(...)
-    if DebugOverlay[event](...) then return end -- UI consumed it
-    if original then original(...) end
-end
-```
+- **`NoTitleBar` + repositioned every frame** — the viewport is furniture,
+  like the transport bar: always centered, not draggable, no chrome
+  competing with the game.
+- **It is not gated on `visible`.** F1 hides the *tools*; hiding the game
+  itself would just be a broken screen.
+- The Inspector and Engine panels now start **snapped** to the left and
+  right edges (`SetNextWindowSnap(..., "once")`) — full-height side rails
+  around the centered viewport. `"once"` means it's a default layout, not
+  a law: drag them free if you prefer floating windows.
 
-That "ask the UI first" pattern is `WantCaptureMouse` from real ImGui, and it
-matters *now* because our card game will be mouse-driven: without it,
-clicking a debug button would also click whatever card is under the cursor.
+## 5. What this costs: input got more interesting
 
-## 4. Tools need reflection: two new Registry queries
+The keyboard path is unchanged — key events don't care where pixels land.
+The mouse is another story, and it's worth understanding *before* our card
+game makes the mouse matter:
 
-The game never asks "which entities exist?" — systems always know which
-components they want. But the inspector must display *everything, without
-knowing any component names up front*. So the Registry gains two
-tool-oriented queries:
+- Screen coordinates no longer equal game coordinates. A click at (600,
+  400) in the editor window is somewhere else entirely inside the 960×540
+  canvas — the viewport's offset (and scale, if you ever scale it) must be
+  undone first.
+- Clicks on the viewport are currently swallowed by the UI (`imlove`
+  reports the viewport window like any other window — correct, but the
+  game never hears them).
 
-```lua
-registry:entities()           -- every entity, sorted
-registry:componentsOf(entity) -- its component names, sorted
-```
-
-This is reflection, engine-flavored, and it's a pattern worth noticing:
-building a tool often forces the engine to grow an introspection API that
-gameplay code never needed.
-
-## 5. Pause and frame-step
-
-Pause is one boolean in the right place. `DebugOverlay.shouldUpdate()` gates
-`Game.update` — and *only* `Game.update`: drawing continues (you're looking
-at the frozen frame) and the overlay continues (a paused game with a dead UI
-would be useless). "Step" grants exactly one update while paused.
-
-Details that make it trustworthy:
-
-- Hiding the overlay lifts the pause — a game frozen by an invisible tool is
-  a bug report waiting to happen.
-- The selected entity is validated every frame (it may have been destroyed)
-  and the selection resets on scene switches (entity numbers restart with
-  each registry).
-
-## 6. The class demo: catching an event in the act
-
-The payoff for everything this course has built so far:
-
-1. Start a match, press **F9** to pause.
-2. Select the ball; drag its `position.x` slider — you're editing the
-   simulation mid-frame, and the render system draws whatever you set,
-   because the registry *is* the game state and everything else just reads it.
-3. Now nudge `position.x` past the right edge and press **F10** once.
-   Look at the entity list: the ball is **gone**, the score went up, and a
-   brand-new entity holding only a `serveRequest` component sits in the list
-   — the event, frozen in the one frame of its life.
-4. Press **F10** again: the request is gone, a new ball exists (new entity
-   number — check it), and the serve is in flight.
-
-You just *watched* the events-as-entities pattern from lesson 02 execute,
-frame by frame. Also fun: pause on the menu, press SPACE, and find the
-lingering `switchRequest` — it executes the moment you unpause.
-
-## 7. A war story: the tool found a real bug
-
-The first time this lesson ran, starting a match crashed the game:
-`Cannot use object after it has been released`. The chain: our render
-systems called `font:release()` in `unload`; the released font was still
-`love.graphics`' *current* font; and imlove v1.0.0 adopted the current font
-as its UI font at `NewFrame` — so that same frame's `Render` drew with a
-dead object. A **use-after-free, in Lua.**
-
-Two fixes shipped:
-
-- **imlove v1.0.1** creates and owns its font. A tool must not depend on
-  objects whose lifetime the game controls.
-- Our `unload` hooks now just **drop references** and let the garbage
-  collector free them. `release()` reclaims GPU memory immediately, which
-  sounds responsible — but calling it on something that shared state still
-  references trades a little memory for a crash. In a GC language, dropping
-  the reference *is* the cleanup; reach for `release()` only on big assets
-  you can prove nothing else holds.
-
-Note the shape of the event: the bug has existed since lesson 03 — it just
-never detonated, because nothing *used* the released font before something
-replaced it. It worked by luck. The inspector didn't create the bug; it
-revealed it. Good tools do that, and it's also why you integrate tools
-early instead of "when we need them".
+We didn't solve this today because pong doesn't use the mouse. Unity did
+have to: its Game view remaps every mouse event into game coordinates
+before the game sees it. That's exercise 1.
 
 ## Exercises (for your own game repo)
 
-1. Add a **spawn ball** button to the inspector. (One `Button` call plus one
-   `spawn` — but *which* registry, and what happens if you press it on the
-   menu scene? Make it behave sensibly.)
-2. Add a **time scale** slider (0.1×–3×) that multiplies the `dt` passed to
-   `Game.update`. Slow motion for free — where's the right place to apply it?
-3. Show the scene's systems in the inspector, in order. What's missing from
-   our system tables to display them nicely, and what's the least invasive
-   way to add it?
-4. The number sliders are hard-coded to ±960, which is clumsy for `winScore`
-   and useless for very large values. Real ImGui solves this with `DragFloat`
-   (unbounded, drag to change). Read imlove's README: what would you propose
-   for its v1.1?
+1. **Mouse remapping.** Add `DebugOverlay.gameMouse()` returning the mouse
+   position in *game* coordinates (or `nil` when the cursor is outside the
+   viewport). You'll need the viewport's rectangle — where does the
+   overlay already know it?
+2. **Viewport scale.** Add a small combo (0.5× / 1× / 1.5×) to the Engine
+   panel that changes the *displayed* size of the canvas —
+   `imlove.Image(gameCanvas, gw * s, gh * s)` — without touching the
+   game's resolution. What must the exercise-1 remap learn?
+3. **Own the resolution.** The editor window is hardcoded to 1.5×. Make it
+   resizable (`t.window.resizable`) and keep the viewport centered. What
+   should happen when the window gets *smaller* than the game?
+4. **A second view.** Unity has a Game view *and* a Scene view. Render the
+   same registry a second time into a second canvas with a debug-only
+   camera (say, zoomed out 2×) and show it in a second window. What does
+   that force your render systems to parameterize?
 
 ## Next class
 
-`05` — the card game begins: the real title screen, images from files, and
-the asset cache that finally kills the font smell from lesson 03.
+Back on the main line: `05` — the card game begins: the real title screen,
+images from files, and the asset cache that finally kills the font smell
+from lesson 03.
