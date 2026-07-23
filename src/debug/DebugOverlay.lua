@@ -81,32 +81,6 @@ local function buildUi(scene)
 
         imlove.Separator()
 
-        -- the switcher spawns the SAME switchRequest any system would —
-        -- the tool has no special powers. Pressing the current scene's
-        -- button rebuilds it fresh (factories!), so it doubles as a
-        -- restart button. While paused the request just sits in the
-        -- registry: Game.update is what honors it, on the next step.
-        if imlove.CollapsingHeader("scenes") then
-            for i, name in ipairs(Game.sceneNames()) do
-                if i > 1 then imlove.SameLine() end
-                if imlove.Button(name) then
-                    scene.registry:spawn({ switchRequest = { to = name } })
-                end
-            end
-        end
-
-        -- the checkbox list IS the frame order, top to bottom — and each
-        -- one is a live experiment: switch a system off and watch the
-        -- world keep running without it. The off-flag lives on the scene
-        -- (see Scene.new), so a fresh scene always starts with all on.
-        if imlove.CollapsingHeader("systems") then
-            for _, system in ipairs(scene.systems) do
-                local enabled = imlove.Checkbox(system.name or "(unnamed)",
-                    not scene.disabledSystems[system])
-                scene.disabledSystems[system] = (not enabled) or nil
-            end
-        end
-
         local registry = scene.registry
         if imlove.TreeNode("entities") then
             -- a fixed-height scrolling region: the list must stay usable
@@ -143,6 +117,45 @@ local function buildUi(scene)
     imlove.End()
 end
 
+-- The Engine panel, docked at the top-right (the Inspector owns the
+-- top-left). The split is by SUBJECT: the Inspector looks at DATA — the
+-- entities of one scene — while this panel drives the ENGINE: which
+-- scene runs, which systems run. Fixed-size on purpose: when the dating
+-- sim stacks up thirty systems, the list scrolls inside the panel
+-- instead of growing down the whole screen.
+local function buildEnginePanel(scene)
+    imlove.SetNextWindowPos(love.graphics.getWidth() - 240, 10, "once")
+    imlove.SetNextWindowSize(230, 330, "once")
+    if imlove.Begin("Engine") then
+        -- the switcher spawns the SAME switchRequest any system would —
+        -- the tool has no special powers. Pressing the current scene's
+        -- button rebuilds it fresh (factories!), so it doubles as a
+        -- restart button. While paused the request just sits in the
+        -- registry: Game.update is what honors it, on the next step.
+        if imlove.CollapsingHeader("scenes", true) then
+            for i, name in ipairs(Game.sceneNames()) do
+                if i > 1 then imlove.SameLine() end
+                if imlove.Button(name) then
+                    scene.registry:spawn({ switchRequest = { to = name } })
+                end
+            end
+        end
+
+        -- the checkbox list IS the frame order, top to bottom — and each
+        -- one is a live experiment: switch a system off and watch the
+        -- world keep running without it. The off-flag lives on the scene
+        -- (see Scene.new), so a fresh scene always starts with all on.
+        if imlove.CollapsingHeader("systems", true) then
+            for _, system in ipairs(scene.systems) do
+                local enabled = imlove.Checkbox(system.name or "(unnamed)",
+                    not scene.disabledSystems[system])
+                scene.disabledSystems[system] = (not enabled) or nil
+            end
+        end
+    end
+    imlove.End()
+end
+
 function DebugOverlay.toggle()
     visible = not visible
 end
@@ -167,6 +180,7 @@ function DebugOverlay.beginFrame(scene)
 
     if visible then
         buildUi(scene)
+        buildEnginePanel(scene)
     end
 end
 
