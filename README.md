@@ -63,24 +63,29 @@ survives scene switches. Scenes never know it's there. That's the right
 altitude for tools: they observe the game from outside, like a debugger
 observes a process.
 
-main.lua wires it in with the standard imgui integration dance:
+And the wiring lives in its own file too: `src/debug/attach.lua` *wraps*
+the LÖVE callbacks that main.lua defined, so main.lua stays pure game
+bootstrap — it never mentions how the overlay hooks in. Self-installing
+tools are the idiomatic LÖVE pattern (lovebird, lurker and lovedebug all
+work this way). Inside the wrappers you'll find the standard imgui
+integration dance:
 
 ```lua
-DebugOverlay.beginFrame(Game.current())   -- top of love.update
+DebugOverlay.beginFrame(game.current())   -- top of love.update
 if DebugOverlay.shouldUpdate() then       -- the pause gate
-    Game.update(dt)
+    update(dt)                            -- the wrapped Game.update
 end
 ...
-Game.draw()
+draw()                                    -- the wrapped Game.draw
 DebugOverlay.draw()                       -- last: UI on top
 ```
 
-and every input callback asks the overlay first:
+and every input event asks the overlay first:
 
 ```lua
-function love.keypressed(key)
-    if DebugOverlay.keypressed(key) then return end -- UI consumed it
-    Game.keypressed(key)
+love[event] = function(...)
+    if DebugOverlay[event](...) then return end -- UI consumed it
+    if original then original(...) end
 end
 ```
 
