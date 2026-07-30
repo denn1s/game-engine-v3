@@ -1,7 +1,7 @@
 # Small Talk — Game Design Document
 
-> Working title. The cards you collect are *conversation topics*; the battles
-> are dates. Rename freely once the game finds its voice.
+> Working title. The cards you collect are *fragments of conversation*; the
+> battles are dates. Rename freely once the game finds its voice.
 >
 > Genre: **raising sim + card battler** (voted by the class).
 > Reference point: *Tokimeki Memorial*, shrunk to game-jam size.
@@ -51,8 +51,9 @@ one semester, three people you might fall for. All flavor text should be
 archetypal enough that students can reskin characters, places, and topics
 without touching mechanics.
 
-- **Protagonist:** silent-protagonist third-year. Defined entirely by stats
-  and cards; no portrait needed for v1.
+- **Protagonist:** a third-year girl, silent protagonist. One large portrait
+  (~256px) drawn for the raising-sim screen; otherwise defined by stats and
+  cards.
 - **Timeframe:** 12 weeks (one semester), ending on graduation day.
 - **Tone:** light, warm, a little self-aware about being a dating sim.
 
@@ -63,8 +64,11 @@ Three hidden stats, starting at **1 / 1 / 1**:
 | Stat | Trained by | Flavor |
 |------|-----------|--------|
 | **Intelligence** (Int) | Study | Books, trivia, being right |
-| **Charm** (Cha) | Socialize | Warmth, humor, being liked |
+| **Charm** (Cha) | Grooming | Warmth, humor, being liked |
 | **Sense** (Sen) | Hobbies | Intuition, taste, being interesting |
+
+Each stat also has a fixed **color and symbol** used everywhere in the UI:
+**Int = blue square**, **Cha = red circle**, **Sen = green triangle**.
 
 The battle system runs on one rule, a rock-paper-scissors triangle. You never
 match a topic with the *same* stat — you **complement** it:
@@ -87,15 +91,32 @@ Implementation-wise the whole triangle is one lookup table.
 
 Monday to Friday, one choice per day from three activities:
 
-| Activity | Effect |
-|----------|--------|
-| Study | +1 Int |
-| Socialize | +1 Cha |
-| Hobbies | +1 Sen |
+| Activity | Effect | Vignette flavor |
+|----------|--------|-----------------|
+| Study | +1 Int | Books, late nights |
+| Grooming | +1 Cha | A comb through the hair |
+| Hobbies | +1 Sen | Whatever she's into |
 
-That's it for v1. Stats are **hidden** — the player sees flavor feedback
-("you feel sharper"), not numbers. The pack opening *is* the stat screen:
-you learn what you've become by seeing what you can talk about.
+All three are solo, done alone in her room — the flavor of the weekday phase
+is *who you become by yourself*; Saturday is where you find out what that's
+worth.
+
+**Screen & flow** (Princess Maker composition): background illustration of
+her room; large portrait center; the date as a big numeral upper-right; the
+activity menu on the opposite side; a text box along the bottom for flavor
+text. Picking an activity plays a short vignette (flavor text now; a small
+animation if there's time), then fade out → fade in, next day. Five picks
+take under a minute; the day transition *is* the content. State machine:
+`CHOOSING → VIGNETTE → FADE → next day (or → Saturday)`.
+
+**Stat visibility: shape, not magnitude.** Exact numbers stay hidden, but the
+screen shows a small **triangle radar chart normalized to the highest stat**
+— you can see you're Int-heavy and Sense is lagging, but not how strong you
+are in absolute terms. Daily picks visibly nudge the triangle's shape; the
+pack opening still reveals actual power level (card values are bounded by
+the real numbers). Each pick also prints flavor feedback ("you feel
+sharper") from a small per-activity pool of lines (5–8 each) so repeats feel
+alive. Bonus: the radar triangle visually rhymes with the battle triangle.
 
 *Tuning hooks (later, not v1):* rest days, random events, diminishing
 returns, activities that give +2/−1 splits.
@@ -103,8 +124,16 @@ returns, activities that give +2/−1 splits.
 ## 6. Pack generation (Saturday morning)
 
 Every Saturday the player opens a **pack of 5 cards**. Each card is a
-conversation topic with three numbers (e.g. `Zodiac Signs — 1 Int / 2 Cha /
-10 Sen`).
+**phrase — a fragment of conversation** — with three numbers (e.g. `"Have
+you ever noticed how…" — 1 Int / 2 Cha / 10 Sen`). The three stats are three
+registers of speech:
+
+- **Int** — assertions, facts, corrections: "Actually, the funny thing is…"
+- **Cha** — warmth, affirmation, humor: "Haha, no way, tell me more—"
+- **Sen** — observations, left turns: "Doesn't this remind you of…"
+
+In battle this makes the log read as an actual conversation: she says
+something, you answer with the card's phrase, the fiction resolves it.
 
 Generation, per card:
 
@@ -112,7 +141,20 @@ Generation, per card:
    distribution (a 20/5/10 player mostly pulls Int-primary cards).
 2. Roll the primary value between **50–100%** of that hidden stat.
 3. Roll the two off-stats between **0–50%** of their hidden stats.
-4. Pick a topic name from that stat's name pool (pure flavor).
+4. Pick a phrase from the **primary stat's phrase pool** (pure flavor, but
+   pool follows primary stat so a blue Int-heavy card *sounds* Int). Write
+   ~10–15 fragments per stat. *(Later: a small hybrid pool for cards with a
+   high secondary stat — "Okay hear me out, but—" for Int/Cha.)*
+
+**Card art is generated, not drawn.** Each card renders its three stat
+symbols (blue square / red circle / green triangle), sized proportionally to
+their values and placed largest-to-smallest — placement seeded from the
+card's values so the same card always looks the same. The card's background
+hue starts from the primary stat's color and shifts toward the secondary
+stat's hue proportionally, **blended in HSL with fixed saturation and
+lightness** (never averaged in RGB, which turns everything gray-brown). A
+card's silhouette and color telegraph its build at a glance; the detail
+panel shows the actual numbers.
 
 Properties this buys us:
 
@@ -129,29 +171,33 @@ Exact curves are tuning; the invariant is *rolls are bounded by hidden stats*.
 A small walkable map (top-down, tile-based) with **three locations**. Time
 allows **one visit** per Saturday.
 
-| Place | Who's there | She plays | You need |
+| Place | Who's there | They play | You need |
 |-------|-------------|-----------|----------|
-| Library | **The Bookworm** | Int | Sense |
-| Sports field | **The Ace** | Sense | Charm |
-| Arcade | **The Gamer** | Charm | Int |
+| Library | **The Nerdy Girl** | Int | Sense |
+| TBD (student vote) | **TBD (student vote)** | Sense | Charm |
+| TBD | **The Pretty Boy** | Charm | Int |
 
-Each love interest is keyed to the stat she *plays*, which means each one
+Each love interest is keyed to the stat they *play*, which means each one
 creates demand for a *different* stat than the obvious one — the player who
-wants the Bookworm discovers they should have been doing Hobbies, not
+wants the Nerdy Girl discovers they should have been doing Hobbies, not
 Studying. That discovery is a designed moment; don't tutorialize it away.
 
 Character archetypes (placeholder names welcome):
 
-- **The Bookworm** — quotes novels at you, secretly loves when you say
+- **The Nerdy Girl** — quotes novels at you, secretly loves when you say
   something she's never read anywhere. Talks Int; melts for Sense.
-- **The Ace** — all instinct and momentum, allergic to lectures. Talks
-  Sense; melts for Charm.
-- **The Gamer** — playful trash-talker, unimpressed by flattery. Talks
-  Charm; melts for Int (outsmart her and she'll never admit she liked it).
+- **The Sense one — to be proposed and voted on by the class.** The
+  constraint that makes any proposal mechanically valid: *they play Sense
+  (instinct/taste, allergic to lectures) and melt for Charm (warmth cracks
+  their cool)*. Artist, athlete, skater, occult kid — anything that fits
+  that sentence works.
+- **The Pretty Boy** — effortlessly popular, flatter-proof, has heard every
+  compliment twice. Talks Charm; melts for Int (outsmart him and he'll never
+  admit how much he liked it).
 
-As **affection rises, each girl starts mixing in her off-stats** — she opens
-up and shows other sides of herself. This is both the anti-mono-build
-mechanic and genuinely nice characterization.
+As **affection rises, each love interest starts mixing in their off-stats**
+— they open up and show other sides of themselves. This is both the
+anti-mono-build mechanic and genuinely nice characterization.
 
 ## 8. The date (card battle)
 
@@ -193,11 +239,11 @@ whether to dig or to spend is most of the skill.
 
 ## 9. Affection, calendar & endings
 
-- Affection per girl is an integer, displayed fuzzily as hearts (Tokimeki
-  hides truth behind vibes; so do we).
-- Thresholds unlock: new dialogue pools → her mixing off-stats → a scripted
+- Affection per love interest is an integer, displayed fuzzily as hearts
+  (Tokimeki hides truth behind vibes; so do we).
+- Thresholds unlock: new dialogue pools → them mixing off-stats → a scripted
   event date (stretch).
-- **Week 12 → Graduation day.** The girl with the highest affection above a
+- **Week 12 → Graduation day.** The love interest with the highest affection above a
   confession threshold confesses under the tree. Below threshold: the
   friendly-but-alone ending. That ending should sting a little.
 
@@ -209,12 +255,38 @@ replayable to chase a different girl with a different build.
 | Scene | Purpose | Teaches |
 |-------|---------|---------|
 | Week (raising sim) | Pick daily activities | UI, game state, calendar/save data |
-| Pack opening | Reveal 5 new cards | Weighted RNG, animation & juice |
+| Pack opening / collection | Reveal 5 new cards, browse the rest | Weighted RNG, animation & juice, scrolling UI |
 | World map | Walk to a location | Tilemaps, movement, collision, transitions |
 | Date (battle) | The card game | Turn state machines, data-driven design |
-| Collection viewer | Browse your cards | Scrolling UI, data presentation |
 | Recap / Sunday | Week summary, autosave | Serialization |
 | Title / Ending | Frame the run | Scene flow, endings |
+
+The pack opening and the collection viewer are **one scene** with two entry
+modes: a card grid with a detail panel on the left (selected card's phrase
+and numbers). *Collection mode* opens straight into browsing; *pack mode*
+plays a reveal first (5 cards slide in face-down, flip one by one), then
+drops into the same browser with the new cards highlighted.
+
+All scenes read and write one shared **run state** table: week number, day,
+hidden stats, card collection, affection per love interest. Sketch this data
+model before the first scene — it's the contract everything shares.
+
+## 10.5 Presentation & resolution
+
+Native canvas: **640×400** (the PC-98 resolution Princess Maker and
+Tokimeki Memorial were drawn for), rendered to a canvas and integer-scaled —
+window defaults to **×2 (1280×800)**; letterbox any remainder, never scale
+by fractions.
+
+Sprite budget:
+
+| Asset | Size |
+|-------|------|
+| Protagonist portrait (Week scene) | ~256px tall |
+| Love-interest battle busts | 128px (one 256px sprite only for the confession scene, if time) |
+| Cards | 96×128 (hand of 5 fits one row; grid is 5×2 + detail panel) |
+| Large UI (stat triangle, date numerals) | 64px grid |
+| Small UI | 32px grid |
 
 ## 11. Scope
 
