@@ -13,6 +13,14 @@ local MenuInputSystem = { name = "menuInput" }
 
 function MenuInputSystem.update(scene, dt)
     local registry = scene.registry
+
+    -- the menu only listens while the day is CHOOSING: during the
+    -- vignette and the fade it goes inert, so confirm can never pick
+    -- twice. This guard is what makes one confirm key safe to share
+    -- across every listener the scene will ever have.
+    local day = registry:resource("dayloop")
+    if day and day.phase ~= "choosing" then return end
+
     for _, event in registry:each("keyPressed") do
         for _, menu in registry:each("menu") do
             if event.key == "left" then
