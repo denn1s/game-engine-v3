@@ -1,7 +1,7 @@
 -- The Week scene: the raising sim. Princess Maker composition — her
--- room in the background, portrait center, the date as a big numeral
--- upper-right, the activity menu on the right, a text box along the
--- bottom. The day loop lives here: pick an activity, a vignette
+-- room in the background, portrait center, status on the left (the
+-- date, the stat triangle), the activity menu on the right, a text
+-- box along the bottom. The day loop lives here: pick an activity, a vignette
 -- plays, the day fades over — twelve weeks of it.
 
 local Scene = require("src.ecs.Scene")
@@ -15,6 +15,7 @@ local TextboxSystem = require("src.systems.TextboxSystem")
 local MenuRenderSystem = require("src.systems.MenuRenderSystem")
 local TextboxRenderSystem = require("src.systems.TextboxRenderSystem")
 local DateRenderSystem = require("src.systems.DateRenderSystem")
+local RadarRenderSystem = require("src.systems.RadarRenderSystem")
 local FadeRenderSystem = require("src.systems.FadeRenderSystem")
 
 return function(payload)
@@ -74,6 +75,7 @@ return function(payload)
     scene:addSystem(MenuRenderSystem)
     scene:addSystem(TextboxRenderSystem)
     scene:addSystem(DateRenderSystem)
+    scene:addSystem(RadarRenderSystem)
     scene:addSystem(FadeRenderSystem)
 
     return scene
