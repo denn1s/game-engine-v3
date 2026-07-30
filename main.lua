@@ -8,10 +8,13 @@
 -- inside a UI window. Plain `love .` is untouched: the game draws
 -- straight to the screen and F1 summons the overlay from lesson 04.
 --
--- The overlay is NOT part of the game. It sits next to the Game,
--- watching whatever scene is current; scenes never know it's there —
--- and now they don't even know whether the "screen" they draw to is
--- the real one or the editor's canvas.
+-- The overlay is NOT part of the game — and its wiring is not part of
+-- main.lua either. src/debug/attach.lua wraps the callbacks below so
+-- the overlay can watch the Game from outside; scenes never know it's
+-- there — and now they don't even know whether the "screen" they draw
+-- to is the real one or the editor's canvas. This file only
+-- bootstraps: register scenes, start one, hand the callbacks to the
+-- Game.
 --
 -- Key presses still enter the world as DATA: the Game turns each one
 -- into a `keyPressed` event entity in the current scene's registry
@@ -22,6 +25,7 @@
 
 local Game = require("src.Game")
 local DebugOverlay = require("src.debug.DebugOverlay")
+local attachDebugOverlay = require("src.debug.attach")
 
 function love.load(args)
     Game.registerScene("menu", require("src.scenes.MenuScene"))
@@ -30,46 +34,22 @@ function love.load(args)
 
     Game.start("menu")
 
+    attachDebugOverlay(Game)
     if args[1] == "--debug" then
         DebugOverlay.enterEditor()
     end
 end
 
 function love.update(dt)
-    DebugOverlay.beginFrame(Game.current())
-    if DebugOverlay.shouldUpdate() then -- the pause / frame-step gate
-        Game.update(dt)
-    end
+    Game.update(dt)
 end
 
 function love.draw()
-    DebugOverlay.beginGameDraw() -- editor mode: redirect into the canvas
     Game.draw()
-    DebugOverlay.endGameDraw() -- back to the real screen
-    DebugOverlay.draw() -- UI on top of everything (incl. the viewport)
 end
 
 function love.keypressed(key)
-    if DebugOverlay.keypressed(key) then return end
     Game.keypressed(key)
-end
-
--- The game has no mouse input yet, but the pattern is already the right
--- one: when the UI consumes an event, the game must never see it.
-function love.mousepressed(x, y, button)
-    if DebugOverlay.mousepressed(x, y, button) then return end
-end
-
-function love.textinput(text)
-    if DebugOverlay.textinput(text) then return end
-end
-
-function love.mousereleased(x, y, button)
-    if DebugOverlay.mousereleased(x, y, button) then return end
-end
-
-function love.wheelmoved(dx, dy)
-    if DebugOverlay.wheelmoved(dx, dy) then return end
 end
 
 function love.quit()
