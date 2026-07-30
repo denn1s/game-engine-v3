@@ -172,7 +172,10 @@ local function transportButton(label, lit, enabled)
 end
 
 local function buildTransportBar()
-    imlove.SetNextWindowPos(love.graphics.getWidth() / 2 - 62, 10, "once")
+    -- re-centered every frame, like the viewport: the bar can't be
+    -- dragged (NoTitleBar), so a saved position could only ever be a
+    -- stale one — from an ini written when the window was another size
+    imlove.SetNextWindowPos(love.graphics.getWidth() / 2 - 62, 10)
     if imlove.Begin("transport", nil, { "NoTitleBar", "AlwaysAutoResize" }) then
         if transportButton("▶", not paused, true) then -- play = unpause
             paused = false
@@ -256,7 +259,14 @@ end
 -- exactly like this: the editor is a big app, the game draws into a
 -- render target, and a panel displays it.
 function DebugOverlay.enterEditor()
-    love.window.setMode(Screen.w * 1.5, Screen.h * 1.5)
+    -- the window is sized by what has to FIT, not by a multiplier of
+    -- the game: the centered viewport plus a gutter per side wide
+    -- enough for the panels (Engine is 230 + window chrome), and
+    -- headroom above/below for the transport bar. A multiplier broke
+    -- the day the game's resolution changed under it (960×540 → the
+    -- GDD's 640×400) and the panels no longer fit beside the viewport.
+    local gutter, headroom = 280, 100
+    love.window.setMode(Screen.w + 2 * gutter, Screen.h + 2 * headroom)
     gameCanvas = love.graphics.newCanvas(Screen.w, Screen.h)
     love.graphics.setBackgroundColor(EDITOR_BG)
     -- the editor keeps its OWN layout file: window positions saved in a
