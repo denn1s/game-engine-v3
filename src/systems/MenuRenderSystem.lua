@@ -27,6 +27,14 @@ function MenuRenderSystem.draw(scene)
     love.graphics.setFont(smallFont)
     love.graphics.printf("press SPACE to play  —  ESC quits",
         0, screenH * 0.62, screenW, "center")
+
+    -- absent until someone has ever won a match on this machine
+    local highscore = scene.registry:resource("highscore")
+    if highscore then
+        love.graphics.printf(
+            ("best victory: %d - %d"):format(highscore.winner, highscore.loser),
+            0, screenH * 0.72, screenW, "center")
+    end
 end
 
 return MenuRenderSystem
