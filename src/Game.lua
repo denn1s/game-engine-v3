@@ -38,10 +38,12 @@ end
 function Game.update(dt)
     current:update(dt)
 
-    -- key events are broadcasts: systems READ them, nobody destroys
-    -- them. Their frame is over, so the Game — which spawned them —
-    -- sweeps them now. Input lives for exactly one update.
-    for _, entity in ipairs(current.registry:query("keyPressed")) do
+    -- events are broadcasts: systems READ them, nobody destroys them.
+    -- ANY entity spawned with the `event` marker component lives for
+    -- exactly one update — the Game sweeps them all here, once the
+    -- frame is over. (Bevy's Events<T> work the same way: writers
+    -- push, readers poll, the runtime clears.)
+    for _, entity in ipairs(current.registry:query("event")) do
         current.registry:destroy(entity)
     end
 
@@ -65,7 +67,7 @@ function Game.keypressed(key)
     -- entity. LÖVE delivers key events BEFORE love.update, so every
     -- system sees it during this frame's update; Game.update sweeps it
     -- afterwards.
-    current.registry:spawn({ keyPressed = { key = key } })
+    current.registry:spawn({ event = true, keyPressed = { key = key } })
 end
 
 function Game.quit()
