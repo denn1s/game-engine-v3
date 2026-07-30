@@ -14,6 +14,7 @@ local DayLoopSystem = require("src.systems.DayLoopSystem")
 local TextboxSystem = require("src.systems.TextboxSystem")
 local MenuRenderSystem = require("src.systems.MenuRenderSystem")
 local TextboxRenderSystem = require("src.systems.TextboxRenderSystem")
+local DateRenderSystem = require("src.systems.DateRenderSystem")
 local FadeRenderSystem = require("src.systems.FadeRenderSystem")
 
 return function(payload)
@@ -72,6 +73,7 @@ return function(payload)
     scene:addSystem(TextboxSystem)
     scene:addSystem(MenuRenderSystem)
     scene:addSystem(TextboxRenderSystem)
+    scene:addSystem(DateRenderSystem)
     scene:addSystem(FadeRenderSystem)
 
     return scene
