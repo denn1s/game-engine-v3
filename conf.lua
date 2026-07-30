@@ -5,7 +5,7 @@ function love.conf(t)
     -- there and nowhere else) — without it, LÖVE falls back to the
     -- folder name, and renaming the project would orphan every save
     t.identity = "game-engine-v3"
-    t.window.title = "05 - Game State"
+    t.window.title = "Small Talk"
     t.window.width = Screen.w
     t.window.height = Screen.h
     t.version = "11.5"

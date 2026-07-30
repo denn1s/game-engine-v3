@@ -10,4 +10,8 @@
 -- platform; the RESOLUTION belongs to the game. (Unity draws the same
 -- line: `Screen.width` in game code reports the game's resolution, not
 -- the editor window's.)
-return { w = 960, h = 540 }
+--
+-- 640×400 is the PC-98 resolution Princess Maker and Tokimeki Memorial
+-- were drawn for (see docs/GDD.md §10.5). For now the window matches it
+-- 1:1; ×2 integer scaling arrives with the presentation lesson.
+return { w = 640, h = 400 }
