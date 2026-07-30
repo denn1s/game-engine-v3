@@ -151,6 +151,27 @@ function Registry:componentsOf(entity)
     return result
 end
 
+-- RESOURCES: singleton values that aren't really "things in the world" —
+-- the match score, settings, the run state. We just hit the limit of
+-- "everything is an entity": a score has no position, is never queried
+-- alongside anything, and there is exactly one. Real engines give this
+-- its own concept (Bevy calls them resources); ours is a thin veneer
+-- over a hidden singleton entity, so the debug inspector sees resources
+-- for free, like any other component.
+function Registry:setResource(name, value)
+    local entity = self:first(name)
+    if entity then
+        self.components[name][entity] = value
+    else
+        self:spawn({ [name] = value })
+    end
+end
+
+function Registry:resource(name)
+    local _, value = self:first(name)
+    return value
+end
+
 -- For "singleton" components that exist on exactly one entity (match
 -- state, settings...). Returns entity, data.
 function Registry:first(name)

@@ -1,172 +1,159 @@
-# Lesson 04.5 — The editor window: the game in a viewport
+# Lesson 05 — Game state: resources, serialization, the save file
 
-> PIA week 5 · Branch `04.5-GameViewport` · Previous: `04-DebugTools`
+> PIA week 6 · Branch `05-GameState` · Previous: `04.5-GameViewport`
 >
-> **Optional lesson.** Everything after this builds on `04-DebugTools`,
-> not on this branch. Skip it freely; come back when you wonder how Unity
-> puts a running game *inside* the editor.
+> A small lesson on purpose. Before the card game starts generating
+> state worth keeping (twelve weeks of stats, a whole card collection),
+> pong donates its score one last time so we can build the machinery on
+> something we already understand: a value escapes the entity world,
+> becomes text, survives quitting the game, and greets you on the title
+> screen.
 
 ```sh
-love . --debug     # the editor: big window, game in a viewport
-love .             # the plain game, exactly as in lesson 04 (F1 works)
+love .             # win a match, quit, relaunch: the menu remembers
+love . --debug     # watch the highscore resource appear in the inspector
 ```
-
-**F1** toggles the tool panels (the viewport stays — it's the game) ·
-**F9** pauses · **F10** steps one frame.
 
 ```sh
-git diff 04-DebugTools..04.5-GameViewport
+git diff 04.5-GameViewport..05-GameState
 ```
 
-## 1. The one idea: a render target
+## 1. The limit of "everything is an entity"
 
-Unity's Game view looks like magic — a whole game running inside a panel —
-but it is one primitive doing all the work: the game doesn't draw to the
-screen, it draws into a **texture** (a *render target*), and the editor UI
-displays that texture like it would display any image.
+Since lesson 02 the answer to "where does data live?" has been *on an
+entity*. The match score already cheated: `ScoringSystem` spawns an
+entity whose only job is to carry the `match` component, and everyone
+finds it with `registry:first("match")`. It works, but look at what
+we're pretending: a score has no position, is never queried alongside
+anything, and there is exactly one. That's not an entity — that's a
+**global with an alibi**.
 
-LÖVE's render target is `love.graphics.Canvas`:
+Real ECS engines admit this and give singletons their own concept. Bevy
+calls them **resources**; ours is ten lines in `src/ecs/Registry.lua`:
 
 ```lua
-gameCanvas = love.graphics.newCanvas(960, 540)
-
-love.graphics.setCanvas(gameCanvas) -- everything now lands in the texture
-Game.draw()
-love.graphics.setCanvas()           -- back to the real screen
+registry:setResource("highscore", { winner = 5, loser = 2 })
+local highscore = registry:resource("highscore")
 ```
 
-The draw wrapper in `src/debug/attach.lua` brackets the game's draw with
-exactly that (via `DebugOverlay.beginGameDraw`/`endGameDraw`, no-ops
-outside editor mode) — main.lua doesn't change at all:
+Under the hood it *is* still a hidden singleton entity — which means the
+debug inspector shows every resource for free, no new tooling. The point
+of the API isn't the implementation, it's the **declaration**: code that
+says `resource("finalScore")` tells the reader "there is one of these,
+and it isn't a thing in the world."
+
+The gameover scene's `finalScore` is the first convert. The `match`
+component stays as-is — migrating it is exercise 1.
+
+## 2. Serialization: code is data
+
+To outlive a quit, a table has to become text. Lua ships no serializer,
+and it doesn't apologize for it, because it has something better: **a
+Lua table is already valid Lua syntax**. So `src/state/serialize.lua`
+doesn't invent a format — it prints the table as Lua source, and
+deserializing is just *running that text*:
 
 ```lua
-love.draw = function()
-    DebugOverlay.beginGameDraw() -- editor mode: redirect into the canvas
-    draw()                       -- the wrapped Game.draw
-    DebugOverlay.endGameDraw()   -- back to the real screen
-    DebugOverlay.draw()          -- UI on top (incl. the viewport)
-end
+serialize.encode({ bestVictory = { winner = 5, loser = 2 } })
+-- "return {\n    bestVictory = {\n        loser = 2,\n        winner = 5,\n    },\n}"
+
+local chunk = loadstring(text)   -- compile the string into a function
+local data = chunk()             -- run it; the table comes back
 ```
 
-The scenes keep drawing at 960×540 like they always did, and can't tell
-whether the "screen" is real or a texture inside a bigger window.
+Thirty lines of recursion, three decisions worth reading:
 
-At least, that was the theory.
+- **Plain data only.** Numbers, strings, booleans, tables of those. A
+  function or an Image can't be written down as source, so hitting one
+  is an `error()`, not a shrug — a save you can't write is a bug in
+  *what you tried to save*. This rule is why the GDD's `RunState` will
+  hold no functions, no images, no scene references: state that follows
+  the rule serializes for free, forever.
+- **Sorted keys.** `pairs()` order is undefined; sorting makes the same
+  table always print the same file. Stable output means save files diff
+  cleanly — you can `git diff` your own save while tuning.
+- **`decode` never throws.** `loadstring` + `pcall`, and anything
+  suspicious returns `nil`. A corrupt file is the *caller's* decision
+  (start fresh), not a crash five layers down.
 
-## 2. The first thing the editor did was find a bug
+And one warning for later: `loadstring` on a file **executes** that
+file. For your own save directory that's fine; for anything a stranger
+can hand you (downloaded saves, network data) it's an arbitrary-code
+vulnerability, and you'd reach for a data-only format instead. Know
+which one you're holding.
 
-The very first `--debug` launch drew PONG's title well right of the
-viewport's center. Nothing in the viewport code was wrong — the *game*
-was. Every system asked the platform for the playfield size:
+## 3. `love.filesystem`, or: never write next to the executable
+
+`src/state/SaveFile.lua` owns the file itself, through `love.filesystem`
+— never `io.open`. LÖVE gives every game a per-user **save directory**
+(named by the new `t.identity` in `conf.lua`) and writes there and
+nowhere else. Why not just write `./save.lua`? Because on a machine that
+isn't yours, the game's folder is read-only (`/usr/bin`, `Program
+Files`), shared between users, and wiped by every update. Every engine
+draws this line; LÖVE just refuses to let you cross it.
+
+The other habit worth forming on day one:
 
 ```lua
-local screenW = love.graphics.getWidth()
+{ version = 1, bestVictory = { winner = 5, loser = 2 } }
 ```
 
-and `getWidth()` answers for the **OS window** — 1440 in the editor —
-while the canvas the game actually draws into is 960 wide. Menus centered
-themselves 240px too far right; balls would spawn off-center; paddles
-clamped against a floor that isn't where the screen ends. The assumption
-"the window IS the game" had been in every system since lesson 01. It was
-never wrong before — window and game were always the same 960×540 — so it
-never detonated. The editor made them differ, and the bug walked right
-out. (Same shape as lesson 04's war story: tools don't create these bugs,
-they *reveal* them.)
+Every save carries a **version**. The day the data changes shape, old
+files announce what they are and can be migrated — or at worst detected
+and discarded — instead of exploding somewhere deep in a scene.
+`SaveFile.load()` returns `nil` for first-run, corrupt, *and*
+wrong-version files alike: to the caller, all three mean "start fresh."
 
-The fix is `src/Screen.lua`, all of one line of data:
+## 4. The wiring: nothing on screen is remembered
 
-```lua
-return { w = 960, h = 540 }
-```
+`src/systems/HighscoreSystem.lua` runs in the gameover scene — and only
+in `setup`, because the match is already history by the time the scene
+exists; there is nothing to do per-frame. It reads the `finalScore`
+resource, compares the winning *margin* against the file (5–0 beats
+5–2), writes a new best, and publishes a `highscore` resource for the
+render system (`isNew` decides between "a new best victory!" and the
+plain line).
 
-The game's logical resolution, written down exactly once. `conf.lua` reads
-it to size the real window, every system reads it instead of asking
-`love.graphics`, and the editor reads it to size the canvas. The window
-belongs to the platform; the **resolution belongs to the game**. Unity
-draws the same line: `Screen.width` in game code reports the game's
-resolution, never the editor window's.
+The title screen closes the loop, and one sentence in `MenuScene.lua`
+is the actual lesson:
 
-## 3. Entering the editor
+> The save file is the only thing that survives between scenes. The
+> title screen reads it fresh every time it's built — nothing on screen
+> is ever "remembered", it's all rebuilt from data.
 
-`--debug` used to just show the overlay; now it calls
-`DebugOverlay.enterEditor()`, which does five small things:
+Scene factories build from scratch (lesson 03), the Game carries no
+payload here, and yet the menu knows. That's the architecture the GDD
+demands — "the save file **is** the run state" — running at pong scale.
 
-1. grows the OS window to 1.5× the game's resolution,
-2. creates the canvas at `Screen.w × Screen.h`,
-3. repaints the backdrop: the editor's background is gray, so the black
-   belongs to the game — the viewport visibly *owns* its pixels (the
-   canvas clears to black in `beginGameDraw`),
-4. points imlove at its own layout file, `imlove-editor.ini` — positions
-   saved in a 1440-wide editor make no sense in the 960-wide plain game,
-   so the two modes must never share one,
-5. shows the overlay.
-
-There is no way back at runtime, and that's fine: editor vs. game is a
-decision you make when you launch, not a mode to toggle mid-match.
-
-## 4. The viewport is just a widget
-
-imlove grew one widget for this, `Image` — the equivalent of
-`ImGui::Image()`, and the same widget real engines use for their viewports:
-
-```lua
-imlove.SetNextWindowPos((sw - gw) / 2 - pad, (sh - gh) / 2 - pad)
-if imlove.Begin("viewport", nil, { "NoTitleBar", "AlwaysAutoResize" }) then
-    imlove.Image(gameCanvas)
-end
-imlove.End()
-```
-
-Three details worth reading twice in `DebugOverlay.lua`:
-
-- **`NoTitleBar` + repositioned every frame** — the viewport is furniture,
-  like the transport bar: always centered, not draggable, no chrome
-  competing with the game.
-- **It is not gated on `visible`.** F1 hides the *tools*; hiding the game
-  itself would just be a broken screen.
-- The Inspector and Engine panels now start **snapped** to the left and
-  right edges (`SetNextWindowSnap(..., "once")`) — full-height side rails
-  around the centered viewport. `"once"` means it's a default layout, not
-  a law: drag them free if you prefer floating windows.
-
-## 5. What this costs: input got more interesting
-
-The keyboard path is unchanged — key events don't care where pixels land.
-The mouse is another story, and it's worth understanding *before* our card
-game makes the mouse matter:
-
-- Screen coordinates no longer equal game coordinates. A click at (600,
-  400) in the editor window is somewhere else entirely inside the 960×540
-  canvas — the viewport's offset (and scale, if you ever scale it) must be
-  undone first.
-- Clicks on the viewport are currently swallowed by the UI (`imlove`
-  reports the viewport window like any other window — correct, but the
-  game never hears them).
-
-We didn't solve this today because pong doesn't use the mouse. Unity did
-have to: its Game view remaps every mouse event into game coordinates
-before the game sees it. That's exercise 1.
+One guard worth noticing: the debug scene switcher can jump straight to
+gameover with no payload, so a 0–0 "match" must not become a highscore.
+A scene you can enter directly is a scene that gets entered with
+garbage; defaults are not enough, the *logic* has to survive them too.
 
 ## Exercises (for your own game repo)
 
-1. **Mouse remapping.** Add `DebugOverlay.gameMouse()` returning the mouse
-   position in *game* coordinates (or `nil` when the cursor is outside the
-   viewport). You'll need the viewport's rectangle — where does the
-   overlay already know it?
-2. **Viewport scale.** Add a small combo (0.5× / 1× / 1.5×) to the Engine
-   panel that changes the *displayed* size of the canvas —
-   `imlove.Image(gameCanvas, gw * s, gh * s)` — without touching the
-   game's resolution. What must the exercise-1 remap learn?
-3. **Own the resolution.** The editor window is hardcoded to 1.5×. Make it
-   resizable (`t.window.resizable`) and keep the viewport centered. What
-   should happen when the window gets *smaller* than the game?
-4. **A second view.** Unity has a Game view *and* a Scene view. Render the
-   same registry a second time into a second canvas with a debug-only
-   camera (say, zoomed out 2×) and show it in a second window. What does
-   that force your render systems to parameterize?
+1. **Migrate `match`.** `ScoringSystem` still hand-rolls its singleton.
+   Move it to `setResource`/`resource` and delete the prefab comment —
+   does anything else break? (The debug inspector shouldn't even
+   notice.)
+2. **Corrupt it on purpose.** Find your save file
+   (`print(love.filesystem.getSaveDirectory())`), open it, and vandalize
+   it — delete a brace, change `version` to 99, replace the whole thing
+   with a poem. The game must start fresh every time, never crash.
+3. **A settings resource.** Add a persistent `settings` table (say,
+   paddle speed) that saves alongside `bestVictory` in the *same* file.
+   What does `SaveFile.save` need so the two owners don't overwrite each
+   other's keys?
+4. **Version 2.** Change the highscore to store the *last five*
+   victories instead of one. Bump `VERSION`, then write a real
+   migration: a v1 file should convert, not be discarded. When is
+   discarding actually the right call?
+5. **The serializer's blind spot.** Our encoder ignores the array part
+   mixed with holes and cycles (`t.self = t` recurses forever). Make
+   cycles an `error("cycle detected")` instead of a stack overflow.
 
 ## Next class
 
-Back on the main line: `05` — the card game begins: the real title screen,
-images from files, and the asset cache that finally kills the font smell
-from lesson 03.
+`06` — the card game begins for real: the 640×400 canvas from the GDD,
+the real title screen, and the Week scene's first layout. The `RunState`
+you'll build there is this lesson's save file with more fields.

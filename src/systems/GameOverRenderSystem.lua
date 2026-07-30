@@ -1,5 +1,6 @@
--- Draws the results screen from the `finalScore` data the scene factory
--- spawned out of the switch payload.
+-- Draws the results screen from the `finalScore` resource the scene
+-- factory made out of the switch payload, plus the `highscore` resource
+-- the HighscoreSystem publishes (absent on a first-ever run).
 
 local Screen = require("src.Screen")
 
@@ -19,7 +20,7 @@ function GameOverRenderSystem.unload(scene)
 end
 
 function GameOverRenderSystem.draw(scene)
-    local _, finalScore = scene.registry:first("finalScore")
+    local finalScore = scene.registry:resource("finalScore")
     local screenW = Screen.w
     local screenH = Screen.h
 
@@ -32,6 +33,16 @@ function GameOverRenderSystem.draw(scene)
         0, screenH * 0.42, screenW, "center")
 
     love.graphics.setFont(smallFont)
+    local highscore = scene.registry:resource("highscore")
+    if highscore and highscore.isNew then
+        love.graphics.printf("a new best victory!",
+            0, screenH * 0.58, screenW, "center")
+    elseif highscore then
+        love.graphics.printf(
+            ("best victory: %d - %d"):format(highscore.winner, highscore.loser),
+            0, screenH * 0.58, screenW, "center")
+    end
+
     love.graphics.printf("press SPACE for the menu",
         0, screenH * 0.7, screenW, "center")
 end
