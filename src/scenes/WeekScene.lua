@@ -7,6 +7,8 @@ local Scene = require("src.ecs.Scene")
 
 local MenuInputSystem = require("src.systems.MenuInputSystem")
 local MenuRenderSystem = require("src.systems.MenuRenderSystem")
+local TextboxSystem = require("src.systems.TextboxSystem")
+local TextboxRenderSystem = require("src.systems.TextboxRenderSystem")
 
 return function(payload)
     local scene = Scene.new("week")
@@ -22,8 +24,23 @@ return function(payload)
         },
     })
 
+    -- the text box: the bottom strip. Pure output — no input system.
+    -- It types its line and sits there until someone (the vignette,
+    -- next lesson) writes new text + visibleChars = 0 into it.
+    scene.registry:spawn({
+        position = { x = 12, y = 316 },
+        size = { w = 616, h = 72 },
+        textbox = {
+            text = "What are you doing today?",
+            visibleChars = 0,
+            speed = 40, -- characters per second
+        },
+    })
+
     scene:addSystem(MenuInputSystem) -- input first: it writes what render reads
+    scene:addSystem(TextboxSystem)
     scene:addSystem(MenuRenderSystem)
+    scene:addSystem(TextboxRenderSystem)
 
     return scene
 end
