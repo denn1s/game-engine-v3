@@ -20,6 +20,7 @@
 local imlove = require("lib.imlove")
 local Game = require("src.Game") -- for the scene switcher only
 local Screen = require("src.Screen") -- the game's resolution, one source
+local serialize = require("src.state.serialize") -- for the dump modal
 
 local DebugOverlay = {}
 
@@ -58,6 +59,73 @@ local function installFont()
     imlove.io.FontDefault = ui
 end
 
+-- How deep the field editor follows nested tables before it gives up.
+-- Plain data cannot contain a cycle — but the inspector reads EVERY
+-- component, and nothing enforces the plain-data rule outside the save
+-- file. A tool that hangs the game on the one bad component you were
+-- trying to look at is not a tool.
+local MAX_DEPTH = 4
+
+-- pairs() order is unstable, and a panel whose rows reshuffle every
+-- frame is unreadable. Numbers sort first and numerically (an array
+-- reads 1, 2, 3 — not 1, 10, 2), strings alphabetically after them;
+-- plain data has no other kind of key.
+local function sortedKeys(data)
+    local keys = {}
+    for key in pairs(data) do
+        keys[#keys + 1] = key
+    end
+    table.sort(keys, function(a, b)
+        if type(a) == type(b) then return a < b end
+        return type(a) == "number"
+    end)
+    return keys
+end
+
+-- One row per field: numbers and booleans get a live widget, nested
+-- tables recurse under a TreeNode, anything else prints as text.
+--
+-- The recursion is what makes RunState inspectable at all: `stats` is a
+-- table inside a table, and an editor that stops at the first level can
+-- only tell you that a table exists. Ctrl+click a slider to type an
+-- exact value — that's how you set Int to 20 without playing eight
+-- weeks of the game first.
+local function fieldEditor(data, depth)
+    for _, key in ipairs(sortedKeys(data)) do
+        local value, label = data[key], tostring(key)
+        if type(value) == "number" then
+            data[key] = imlove.SliderFloat(label, value, -960, 960)
+        elseif type(value) == "boolean" then
+            data[key] = imlove.Checkbox(label, value)
+        elseif type(value) == "table" then
+            if depth >= MAX_DEPTH then
+                imlove.Text("%s: ...", label)
+            -- an open TreeNode pushes its label onto the ID stack, so
+            -- two nested tables that share a key name (`stats.int` and
+            -- `collection[1].int`) never collide on widget state
+            elseif imlove.TreeNode(label) then
+                fieldEditor(value, depth + 1)
+                imlove.TreePop()
+            end
+        else
+            imlove.Text("%s: %s", label, tostring(value))
+        end
+    end
+end
+
+-- The dump modal: a component printed the way the SAVE FILE would write
+-- it, by reusing the game's own serializer. The tree above is for poking
+-- one value; this is for reading a whole shape at once (a 50-card
+-- collection is not a thing you inspect one TreeNode at a time).
+--
+-- It also doubles as a PLAIN-DATA LINTER. serialize.encode errors on
+-- anything that can't be written down as Lua source, so pointing this at
+-- a component holding a font or a canvas prints the reason instead of
+-- the data — the rule from lesson 05 stops being a promise students have
+-- to take on faith and becomes something the tool tells them.
+local DUMP_TITLE = "component dump"
+local dumpText = nil -- a SNAPSHOT, taken when the button is pressed
+
 -- One Combo picks WHICH component to edit, and only that one is drawn.
 -- With a tree per component the editor grows with the entity; with a
 -- Combo it stays one dropdown tall no matter how many components the
@@ -73,22 +141,29 @@ local function componentEditor(registry, entity)
     if not name then return end
     local data = registry:get(entity, name)
 
-    local keys = {} -- pairs() order is unstable; sort for a calm UI
-    for k in pairs(data) do
-        keys[#keys + 1] = k
+    if imlove.Button("dump") then
+        -- pcall: a linter REPORTS that a component isn't plain data. It
+        -- does not crash the tool that just found out.
+        local ok, result = pcall(serialize.encode, data)
+        dumpText = ("-- %s\n%s"):format(name,
+            ok and result or ("-- cannot serialize: " .. tostring(result)))
+        imlove.OpenPopup(DUMP_TITLE)
     end
-    table.sort(keys)
-
-    for _, k in ipairs(keys) do
-        local v = data[k]
-        if type(v) == "number" then
-            data[k] = imlove.SliderFloat(k, v, -960, 960)
-        elseif type(v) == "boolean" then
-            data[k] = imlove.Checkbox(k, v)
-        else
-            imlove.Text("%s: %s", k, tostring(v))
+    if imlove.BeginPopupModal(DUMP_TITLE) then
+        -- fixed box, not auto-fit: a modal sized to its content would
+        -- grow taller than the screen by week three
+        if imlove.BeginChild("dump", 520, 300, true) then
+            imlove.Text(dumpText or "")
         end
+        imlove.EndChild()
+        if imlove.Button("close") then
+            dumpText = nil
+            imlove.CloseCurrentPopup()
+        end
+        imlove.EndPopup()
     end
+
+    fieldEditor(data, 1)
 end
 
 local function buildUi(scene)
