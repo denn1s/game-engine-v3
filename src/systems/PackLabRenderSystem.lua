@@ -4,6 +4,7 @@
 -- next lesson.
 
 local CardGenerator = require("src.generation.CardGenerator")
+local CardRenderer = require("src.cards.CardRenderer")
 local Screen = require("src.Screen")
 
 local PackLabRenderSystem = { name = "packLabRender" }
@@ -17,17 +18,16 @@ local LABELS = { int = "INT", charm = "CHA", sense = "SEN" }
 local PAPER = { 0.94, 0.90, 0.78 }
 local INK = { 0.10, 0.11, 0.16 }
 
-local titleFont, bodyFont, smallFont, cardFont
+local titleFont, bodyFont, smallFont
 
 function PackLabRenderSystem.setup(scene)
     titleFont = love.graphics.newFont(19)
     bodyFont = love.graphics.newFont(12)
     smallFont = love.graphics.newFont(10)
-    cardFont = love.graphics.newFont(11)
 end
 
 function PackLabRenderSystem.unload(scene)
-    titleFont, bodyFont, smallFont, cardFont = nil, nil, nil, nil
+    titleFont, bodyFont, smallFont = nil, nil, nil
 end
 
 local function drawStatControls(stats, selected)
@@ -51,22 +51,23 @@ local function drawStatControls(stats, selected)
 end
 
 local function drawCard(card, x, y, index)
-    love.graphics.setColor(PAPER)
-    love.graphics.rectangle("fill", x, y, 116, 112, 3, 3)
-    love.graphics.setColor(0, 0, 0, 0.28)
-    love.graphics.rectangle("line", x, y, 116, 112, 3, 3)
+    -- Keep the lab's exact numbers, but let the upper half use the same visual
+    -- identity the collection and, later, the date hand will show.
+    CardRenderer.draw(card, x, y, 116, 112)
+    love.graphics.setColor(PAPER[1], PAPER[2], PAPER[3], 0.96)
+    love.graphics.rectangle("fill", x + 2, y + 48, 112, 62)
 
     local color = COLORS[card.primary]
     love.graphics.setColor(color)
-    love.graphics.rectangle("fill", x, y, 116, 22, 3, 3)
-    love.graphics.rectangle("fill", x, y + 18, 116, 4)
-    love.graphics.setColor(1, 1, 1)
     love.graphics.setFont(smallFont)
-    love.graphics.print(("%d  %s"):format(index, LABELS[card.primary]), x + 6, y + 5)
+    love.graphics.print(("%d  %s"):format(index, LABELS[card.primary]), x + 6, y + 52)
 
     love.graphics.setColor(INK)
-    love.graphics.setFont(cardFont)
-    love.graphics.printf(card.phrase, x + 7, y + 29, 102, "left")
+    love.graphics.setFont(smallFont)
+    love.graphics.push("all")
+    love.graphics.setScissor(x + 7, y + 65, 102, 25)
+    love.graphics.printf(card.phrase, x + 7, y + 66, 102, "left")
+    love.graphics.pop()
     love.graphics.setFont(smallFont)
     local stats = card.stats
     love.graphics.printf(("I %02d   C %02d   S %02d"):format(
