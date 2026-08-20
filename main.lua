@@ -19,10 +19,11 @@ local attachDebugOverlay = require("src.debug.attach")
 function love.load(args)
     Game.registerScene("week", require("src.scenes.WeekScene"))
     Game.registerScene("packLab", require("src.scenes.PackLabScene"))
+    Game.registerScene("collection", require("src.scenes.CollectionScene"))
 
-    -- This lesson starts in its balancing instrument. In --debug mode the
-    -- scene switcher can still jump back to the raising sim at any time.
-    Game.start("packLab")
+    -- The generator's balancing instrument remains available in the debug
+    -- scene switcher; lesson 11 starts where those generated cards will live.
+    Game.start("collection")
 
     attachDebugOverlay(Game)
     if args[1] == "--debug" then
