@@ -18,8 +18,11 @@ local attachDebugOverlay = require("src.debug.attach")
 
 function love.load(args)
     Game.registerScene("week", require("src.scenes.WeekScene"))
+    Game.registerScene("packLab", require("src.scenes.PackLabScene"))
 
-    Game.start("week")
+    -- This lesson starts in its balancing instrument. In --debug mode the
+    -- scene switcher can still jump back to the raising sim at any time.
+    Game.start("packLab")
 
     attachDebugOverlay(Game)
     if args[1] == "--debug" then

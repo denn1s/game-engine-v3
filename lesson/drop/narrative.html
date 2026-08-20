@@ -1,0 +1,510 @@
+<title>Narrative as Mechanic — 1h30 Run Sheet</title>
+<style>
+  :root {
+    --ground:    #FAF6EC;
+    --surface:   #F2EBDA;
+    --surface-2: #E7DEC7;
+    --ink:       #23212E;
+    --ink-dim:   #6B6579;
+    --rule:      #DCD2BC;
+    --rule-soft: #EAE1CE;
+    --int:       #2F55A8;
+    --cha:       #B03A45;
+    --sen:       #2E7A46;
+    --accent:    #2F55A8;
+    --warn-bg:   #F6E9D4;
+
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --serif: Charter, "Bitstream Charter", "Iowan Old Style", "Source Serif Pro", Georgia, serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:    #17161F;
+      --surface:   #211F2B;
+      --surface-2: #2C2838;
+      --ink:       #F5EDD9;
+      --ink-dim:   #948DA3;
+      --rule:      #383243;
+      --rule-soft: #2A2634;
+      --int:       #7A9FEC;
+      --cha:       #E4767F;
+      --sen:       #74CE8F;
+      --accent:    #7A9FEC;
+      --warn-bg:   #2E2739;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:    #17161F;
+    --surface:   #211F2B;
+    --surface-2: #2C2838;
+    --ink:       #F5EDD9;
+    --ink-dim:   #948DA3;
+    --rule:      #383243;
+    --rule-soft: #2A2634;
+    --int:       #7A9FEC;
+    --cha:       #E4767F;
+    --sen:       #74CE8F;
+    --accent:    #7A9FEC;
+    --warn-bg:   #2E2739;
+  }
+
+  * { box-sizing: border-box; }
+
+  /* Presenter sizing: everything scales off html, so bump one number to resize. */
+  html { font-size: 20px; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 1.1rem;
+    line-height: 1.6;
+    margin: 0;
+    padding: 3rem 1.5rem 6rem;
+  }
+
+  .page { max-width: 56rem; margin: 0 auto; }
+
+  h1, h2, h3, .label, .clock, .mins {
+    font-family: var(--mono);
+    font-weight: 600;
+  }
+
+  h1 {
+    font-size: 1.7rem;
+    letter-spacing: 0.02em;
+    line-height: 1.3;
+    margin: 0 0 0.75rem;
+    text-wrap: balance;
+  }
+
+  h2 {
+    font-size: 0.85rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin: 0;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  h3 {
+    font-size: 1.15rem;
+    letter-spacing: 0.01em;
+    margin: 0;
+  }
+
+  p { margin: 0; }
+  a { color: var(--accent); }
+
+  .stack   { display: flex; flex-direction: column; gap: 1rem; }
+  .section { display: flex; flex-direction: column; gap: 1.25rem; margin-top: 3.25rem; }
+
+  header { display: flex; flex-direction: column; gap: 1rem; }
+
+  .lede { color: var(--ink-dim); font-size: 1.1rem; max-width: 44rem; }
+
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem;
+    font-family: var(--mono); font-size: 0.78rem;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink-dim);
+    padding-top: 1rem; border-top: 2px solid var(--ink);
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  /* ---- run sheet ---- */
+  .beat {
+    display: grid;
+    grid-template-columns: 5rem 1fr;
+    gap: 0 1.5rem;
+    padding: 1.2rem 0;
+    border-top: 1px solid var(--rule-soft);
+  }
+  .beat:first-child { border-top: 1px solid var(--rule); }
+
+  .clock {
+    font-size: 1rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    padding-top: 0.15rem;
+  }
+  .mins {
+    display: block;
+    font-size: 0.72rem; font-weight: 400;
+    letter-spacing: 0.06em;
+    color: var(--ink-dim);
+  }
+  .body { display: flex; flex-direction: column; gap: 0.65rem; min-width: 0; }
+  .why { color: var(--ink-dim); font-size: 1rem; }
+  .why em { color: var(--ink); font-style: italic; }
+  .why b  { color: var(--ink); font-weight: 600; }
+
+  .beat.check { background: var(--surface); }
+  .beat.check h3 { color: var(--accent); }
+  .beat.check { padding-left: 1rem; padding-right: 1rem; margin: 0 -1rem; }
+
+  .cutline {
+    display: grid; grid-template-columns: 5rem 1fr; gap: 0 1.5rem;
+    align-items: center;
+    padding: 0.9rem 0;
+    border-top: 2px dashed var(--cha);
+    border-bottom: 2px dashed var(--cha);
+    margin: 0.5rem 0;
+  }
+  .cutline .label {
+    font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--cha);
+  }
+  .cutline p { font-size: 0.98rem; color: var(--ink-dim); }
+
+  /* ---- say-out-loud lines ---- */
+  .say {
+    font-family: var(--serif);
+    font-size: 1.1rem;
+    color: var(--ink);
+    border-left: 3px solid var(--accent);
+    padding: 0.15rem 0 0.15rem 1rem;
+  }
+
+  /* ---- ask-the-room list ---- */
+  ul.ask { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 0.7rem; }
+  ul.ask li {
+    padding-left: 1rem;
+    border-left: 3px solid var(--rule);
+    font-size: 1.05rem; color: var(--ink);
+  }
+  ul.ask li span { display: block; font-size: 0.92rem; color: var(--ink-dim); font-style: italic; margin-top: 0.2rem; }
+
+  /* ---- code ---- */
+  pre {
+    font-family: var(--mono); font-size: 0.82rem; line-height: 1.65;
+    background: var(--surface); color: var(--ink);
+    border-left: 2px solid var(--rule);
+    padding: 0.8rem 1rem; margin: 0;
+    overflow-x: auto;
+  }
+  pre .c { color: var(--ink-dim); }
+  code {
+    font-family: var(--mono); font-size: 0.85em;
+    background: var(--surface-2); padding: 0.08em 0.35em;
+    border-radius: 2px;
+  }
+
+  /* ---- tables ---- */
+  .tablewrap { overflow-x: auto; }
+  table {
+    border-collapse: collapse;
+    font-family: var(--mono); font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    min-width: 100%;
+  }
+  th, td {
+    text-align: right;
+    padding: 0.4rem 0.9rem 0.4rem 0;
+    border-bottom: 1px solid var(--rule-soft);
+    white-space: nowrap;
+  }
+  th {
+    font-weight: 600; color: var(--ink-dim);
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--rule);
+  }
+  td:last-child, th:last-child { padding-right: 0; color: var(--accent); }
+  tbody td:first-child, thead th:first-child { color: var(--ink-dim); }
+
+  table.text th, table.text td { text-align: left; white-space: normal; }
+  table.text td:last-child, table.text th:last-child { color: var(--ink-dim); }
+  table.text tbody td:first-child { color: var(--ink); font-weight: 600; }
+
+  /* ---- phase strip ---- */
+  .phases {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+    font-family: var(--mono); font-size: 0.76rem;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 0.9rem 1rem; background: var(--surface); overflow-x: auto;
+  }
+  .phase {
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--rule); color: var(--ink);
+    white-space: nowrap;
+  }
+  .arrow { color: var(--ink-dim); white-space: nowrap; }
+
+  /* ---- callout ---- */
+  .callout {
+    background: var(--warn-bg);
+    border-left: 3px solid var(--cha);
+    padding: 1.1rem 1.25rem;
+    display: flex; flex-direction: column; gap: 0.6rem;
+  }
+  .callout .label {
+    font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--cha);
+  }
+  .callout p { font-size: 1rem; }
+  .callout ul { margin: 0; padding-left: 1.1rem; color: var(--ink-dim); font-size: 1rem; }
+  .callout li { margin-bottom: 0.35rem; }
+  .callout.ask2 { background: var(--surface); border-left-color: var(--accent); }
+  .callout.ask2 .label { color: var(--accent); }
+
+  ul.plain { margin: 0; padding-left: 1.1rem; }
+  ul.plain li { margin-bottom: 0.5rem; }
+
+  /* ---- the exercise deliverable ---- */
+  .form {
+    display: flex; flex-direction: column; gap: 0.9rem;
+    background: var(--surface); padding: 1.1rem 1.25rem;
+  }
+  .form .row { display: flex; flex-direction: column; gap: 0.25rem; }
+  .form .k {
+    font-family: var(--mono); font-size: 0.72rem;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent);
+  }
+  .form .v { font-size: 1rem; color: var(--ink-dim); font-style: italic; }
+
+  @media (max-width: 44rem) {
+    html { font-size: 21px; }
+    body { padding: 2rem 1rem 4rem; line-height: 1.7; }
+    .beat, .cutline { grid-template-columns: 1fr; gap: 0.5rem; }
+    .clock { display: flex; align-items: baseline; gap: 0.6rem; }
+    .mins { display: inline; }
+    pre, code { line-height: 1.7; }
+  }
+</style>
+
+<div class="page">
+
+  <header>
+    <h1>Narrative as Mechanic</h1>
+    <p class="lede">Not "how to write a story for your game." The claim of this class is stronger and less comfortable: <em>your systems are already making statements, whether or not you chose them.</em> They wrote narrative last class and didn't notice — that's the hook, and it's sitting in their own repo.</p>
+    <div class="meta">
+      <span><b>1h30</b> budget</span>
+      <span>CC3096 · <b>Small Talk</b></span>
+      <span>ref <b>08-DayLoop</b> · <b>09-StatTriangle</b></span>
+      <span>GDD <b>§4</b> · <b>§8</b></span>
+      <span>in-class write <b>25 min</b></span>
+    </div>
+  </header>
+
+  <div class="section">
+    <h2>The shape of the class</h2>
+    <div class="phases">
+      <span class="phase">poll</span>
+      <span class="arrow">→</span>
+      <span class="phase">your own code, interrogated</span>
+      <span class="arrow">→</span>
+      <span class="phase">the triangle as an argument</span>
+      <span class="arrow">→</span>
+      <span class="phase">where narrative lives</span>
+      <span class="arrow">→</span>
+      <span class="phase">write</span>
+      <span class="arrow">→</span>
+      <span class="phase">share</span>
+    </div>
+    <p class="why">Nothing to install, nothing to run. Have <code>WeekScene</code>, <code>DayLoopSystem</code>, <code>FadeRenderSystem</code> and <code>activities.lua</code> open in tabs before class, plus the game itself running — you'll switch between the fiction and the file that causes it several times, and it lands much harder side by side than described.</p>
+  </div>
+
+  <div class="section">
+    <h2>Run sheet</h2>
+
+    <div class="beat">
+      <span class="clock">0:00<span class="mins">5 min</span></span>
+      <div class="body">
+        <h3>The poll — which one first</h3>
+        <p class="why">Live poll in the first five minutes, not sent out beforehand. An async poll comes back with four responses and now you've manufactured evidence that nobody cares; live, everyone present votes and turnout is 100% by construction.</p>
+        <p class="say">"Two classes, art and narrative. You're both getting both. This vote decides which one is today."</p>
+        <p class="why"><em>Framing matters:</em> ordering, never preference. A 4–3 vote on "which do you want" leaves three people who lost. A 4–3 vote on "which first" leaves nobody out.</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:05<span class="mins">12 min</span></span>
+      <div class="body">
+        <h3>You already wrote narrative — three questions</h3>
+        <p class="why">Run the game. Play a day. Then ask the room, and <b>wait for answers</b> — this beat dies if you answer your own questions. Long silences are correct here.</p>
+        <ul class="ask">
+          <li>Why is <code>FADE_TIME</code> 1.6 seconds and not 0.2?
+            <span>0.2s is a cut, and a cut says "next screen." 1.6s says "a day went by." Same code, different sentence.</span></li>
+          <li>Why are all three activities done alone in her room?
+            <span>Because the weekday phase is about <em>who you become by yourself</em>, and Saturday is where you find out what that's worth. If one activity were "hang out with a friend," the whole structure would be making a different argument.</span></li>
+          <li>Why does the day advance at the fade's <em>midpoint</em> instead of at the end?
+            <span>Technically: the world is only consistent when nobody can act. Narratively: things change while you aren't looking. Both answers are true, and that's the point.</span></li>
+        </ul>
+        <p class="say">"None of that is text. There's no dialogue in any of it. You built all three of those meanings last class, out of a timer and a subtraction."</p>
+        <p class="why"><em>Teaching point to name explicitly:</em> narrative in games is not the writing layer sitting on top of the systems. It's the answer to "why is this number this number." Every constant in that file is a claim about the world.</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:17<span class="mins">13 min</span></span>
+      <div class="body">
+        <h3>The triangle is an argument, not a rule set</h3>
+        <p class="why">Put up the battle triangle (GDD §4). It is <b>one lookup table</b> — and that table is the thesis of the entire game.</p>
+<pre>        Int
+       ↗    ↘
+   answers    is answered by
+     Cha  ←   Sen
+
+she plays Int   → you answer with Sense  <span class="c">-- don't out-nerd her; be interesting</span>
+she plays Sense → you answer with Charm  <span class="c">-- don't compete on taste; be warm</span>
+she plays Charm → you answer with Int    <span class="c">-- don't out-charm her; impress her</span></pre>
+        <p class="say">"Complement, don't compete. That's not a tagline I wrote after the fact — it's the shape of the table."</p>
+        <p class="why"><b>Now the counter-examples.</b> Same data structure, same amount of code, three completely different games. This table is the single most useful thing on the projector today:</p>
+        <div class="tablewrap">
+          <table class="text">
+            <thead><tr><th>if the rule were…</th><th>…the game would be about</th></tr></thead>
+            <tbody>
+              <tr><td>counter stat beats her stat</td><td>conversation as generosity — you win by meeting someone where they aren't</td></tr>
+              <tr><td>same stat beats her stat</td><td>conversation as a contest — you win by out-doing her at her own thing</td></tr>
+              <tr><td>highest raw number wins</td><td>conversation as status — the strongest person in the room talks</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="why">Then the second example, which is the one that usually clicks harder because it's ugly and specific — <b>the stall</b> (GDD §8). Matching her stat instead of countering it gives you no affection but draws a replacement card. In the fiction that's <em>"Haha, yeah, totally."</em> Filler. It costs you nothing, gains you nothing, and buys you one more thing to say.</p>
+        <p class="say">"Somebody had to decide that saying nothing of substance should be mechanically <em>safe but sterile</em>. That's a claim about small talk, and it's implemented as a table lookup and a draw."</p>
+        <p class="why"><em>Teaching point:</em> you cannot bolt a theme onto a finished system. If the resolution table said "same stat wins," no amount of dialogue would make this a game about generosity — the player's hands would be learning the opposite lesson from their fingers.</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:30<span class="mins">10 min</span></span>
+      <div class="body">
+        <h3>Where narrative actually lives in a codebase</h3>
+        <p class="why">Three places, and they're all files they've already seen or will write:</p>
+        <ul class="plain">
+          <li><b>1 — Data tables.</b> <code>activities.lua</code> holds the flavor pools; the phrase pools will hold the card lines. Designers edit these, systems read them, nothing in them can have a bug that isn't a typo. <em>This is the layer people mean when they say "narrative," and it's the least interesting of the three.</em></li>
+          <li><b>2 — Numbers.</b> <code>FADE_TIME</code>. <code>DISPLAY_MAX</code> on the triangle. Affection moving by exactly ±1. Five exchanges per date, not ten. Twelve weeks, not fifty. Every one of those is a sentence about the world, written as a constant.</li>
+          <li><b>3 — Absences.</b> The subtle one. What you <em>refuse</em> to show is narrative too.</li>
+        </ul>
+        <p class="why"><b>Spend the most time on absences,</b> because it's the part nobody expects:</p>
+        <ul class="plain">
+          <li>The stats are <b>hidden</b>. You see a triangle's shape, never the numbers — you can't measure who you're becoming, you can only see that you're lopsided.</li>
+          <li>Affection shows as <b>fuzzy hearts</b>, not integers. The game knows the exact number and won't tell you.</li>
+          <li>The alone ending has no failure screen. The GDD's requirement for it is literally <em>"that ending should sting a little"</em> — a design spec written as a feeling.</li>
+        </ul>
+        <p class="why"><b>Then the best example in the whole document,</b> because it's the one where fiction won an argument against a programmer:</p>
+        <p class="say">"Cards are never destroyed. A card you play is out <em>for this date only</em> — because 'you already told her that story today.' The obvious engineering choice is a consumable resource. One sentence of fiction overruled it, and that's why the data model has a per-date discard instead of a shrinking collection."</p>
+        <p class="why"><em>Teaching point:</em> that's a data-structure decision made by narrative. It's not decoration on the system — it <b>is</b> the system, and the fiction is the reason it's shaped that way.</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:40<span class="mins">5 min</span></span>
+      <div class="body">
+        <h3>The exercise — a fault, and the mechanic that tells on it</h3>
+        <p class="why">The chain is the assignment: <b>character fault → the mechanic that expresses it → the palette that dresses it.</b> Fiction in, system out. Not a backstory, not a paragraph — three lines.</p>
+        <div class="form">
+          <div class="row">
+            <span class="k">1 · the fault</span>
+            <span class="v">One sentence. Not a flaw they'd list on a dating profile — something that costs them something.</span>
+          </div>
+          <div class="row">
+            <span class="k">2 · the mechanic</span>
+            <span class="v">One sentence. Must be buildable in a game like ours, and the player must be able to <em>feel</em> it without being told what it means.</span>
+          </div>
+          <div class="row">
+            <span class="k">3 · the palette</span>
+            <span class="v">Three words. No hex codes — "muted and cold with one loud accent." We haven't done the color class yet, and describing a palette in language is the narrative half anyway.</span>
+          </div>
+        </div>
+        <p class="why"><b>Seed it with examples or they will freeze.</b> Give two, out loud, and let them see how mechanical the second line has to be:</p>
+        <ul class="plain">
+          <li><em>Can't admit when she's wrong</em> → a card you've played once in a conversation can never be replayed, even when it would obviously win.</li>
+          <li><em>Afraid of silence</em> → a countdown per exchange that punishes hesitating, so the pressure makes you play badly.</li>
+          <li><em>Needs everyone to like them</em> → affection with one person quietly decays whenever you spend a Saturday with someone else.</li>
+        </ul>
+        <p class="why"><em>Say the constraint out loud:</em> the mechanic has to be describable in one sentence. If it takes a paragraph, it's a story, not a system.</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:45<span class="mins">25 min</span></span>
+      <div class="body">
+        <h3>Write — and you write too</h3>
+        <p class="why"><b>This is the answer to "what do I do while they work."</b> You write one as well, silently, and you don't show it until the share. No dead air, nobody being watched, and if the room goes quiet at 1:10 you still have something to put on screen.</p>
+        <p class="why"><em>What not to do:</em> don't check in every three minutes. In a remote room that reads as surveillance, and it makes people hide unfinished work — the exact behavior you're trying to kill.</p>
+        <ul class="plain">
+          <li><b>Timer on screen</b>, visible the whole time. Silence is only comfortable when people can see how much of it is left.</li>
+          <li><b>Warnings at 10 min and 3 min left.</b> Nothing else spoken.</li>
+          <li><b>Chat stays open</b> for stuck people — answer in chat, not out loud. The most common block is line 2; the unblock is "what does the player have to <em>do differently</em> because of this fault?"</li>
+          <li>Three lines is small on purpose. Anyone who finishes early writes a second character, ideally one whose fault makes them <em>incompatible</em> with the first.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="beat check">
+      <span class="clock">1:10<span class="mins">12 min</span></span>
+      <div class="body">
+        <h3>The share — 3, 2, 1, paste</h3>
+        <p class="why"><b>This is the answer to "what if nobody shares."</b> The reason nobody shares in a remote class is that somebody has to go first. Remove that:</p>
+        <ul class="plain">
+          <li><b>Three lines pasted into chat.</b> Not a doc, not a link. Lowest possible friction.</li>
+          <li><b>Count down out loud — 3, 2, 1 — and everyone pastes at once</b>, including you. Simultaneity is the whole trick.</li>
+          <li>Read them out. Then apply one test to each, and only that test.</li>
+        </ul>
+        <p class="say">"Would this mechanic still say the same thing if I deleted every word of text from the game?"</p>
+        <p class="why">That's the criterion for the whole class. If yes, the narrative is <em>in</em> the system. If no, it's painted on — which isn't a failure, it's a diagnosis, and the fix is usually one sentence away.</p>
+        <p class="why"><b>Fallback, if it's still crickets:</b> have <b>three of your own</b> ready — one where the mechanic clearly carries the fiction, one where it's decoration, one you can't figure out how to build — and walk your own three for the full twelve minutes. Nobody gets put on the spot and the lesson still lands. Written before class, reusable every semester.</p>
+        <p class="why"><em>If a mechanic is genuinely good, say so and write it down.</em> The stretch list in §11 has room, and "we're building yours in week 9" is the single strongest thing you can say in this course.</p>
+      </div>
+    </div>
+
+    <div class="cutline">
+      <span class="label">Cut line</span>
+      <p>The 0:05 discussion will want to run long — that's the best beat, let it. Pay for it by <b>cutting "where narrative lives" (0:30) down to absences only</b>, or dropping it entirely. Never cut the write or the share: the exercise is the class, the theory is what this page is for.</p>
+    </div>
+
+    <div class="beat">
+      <span class="clock">1:22<span class="mins">8 min</span></span>
+      <div class="body">
+        <h3>Homework, and naming the payoff</h3>
+        <p class="why">Assign the phrase pools, and be explicit about what happens to them — this is the sentence that makes the homework worth doing:</p>
+        <p class="say">"Next class we build the pack generator. The first thing it prints will be your lines, coming out of a random roll, in a card that draws its own art. Whatever you don't write, the game doesn't get to say."</p>
+        <p class="why">Then name the through-line so the class doesn't file today under "the week we didn't code": every phrase they write is <b>data</b>, the generator that consumes it is <b>code</b>, and the whole reason the split works is the constraint on the card below.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Homework</h2>
+    <ul class="plain">
+      <li><b>The phrase pools</b> — the card below. Due regardless of which lesson won the poll, because next class needs them as input.</li>
+      <li><b>Finish the character.</b> The three lines from class, plus one more: the sentence they say in a conversation when the fault is winning. That line is a card in their own game.</li>
+      <li><b>Find one mechanic in a game you love that is secretly an argument</b>, and write two sentences on what it's arguing. Not a story beat — a rule. Save-point placement, fall damage, a stamina bar, permadeath, a currency you can't stop spending.</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>The phrase pools — feeds next class</h2>
+    <div class="callout">
+      <span class="label">Assign this today, whichever lesson won the poll</span>
+      <p>Next class builds the pack generator, and it needs a phrase pool to draw from. If this homework doesn't go out today, that lesson slips a week. It's ~30 minutes of writing and it needs no theory.</p>
+      <p><b>10–15 fragments per stat</b>, plain text, three headed lists — you'll paste them straight into a Lua table.</p>
+      <div class="tablewrap">
+        <table class="text">
+          <thead><tr><th>stat</th><th>register</th><th>example</th></tr></thead>
+          <tbody>
+            <tr><td>Int</td><td>assertions, facts, corrections</td><td>"Actually, the funny thing is…"</td></tr>
+            <tr><td>Cha</td><td>warmth, affirmation, humor</td><td>"Haha, no way, tell me more—"</td></tr>
+            <tr><td>Sen</td><td>observations, left turns</td><td>"Doesn't this remind you of…"</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><b>The one hard constraint — and it's a real engineering lesson:</b> each fragment must work as a reply to <em>anything</em>. The generator pairs a random phrase with a random topic, so a line that only makes sense after one specific subject will break the moment it's dealt. Write openings, not answers. That constraint is what makes text data-driven instead of scripted.</p>
+      <p>It's also the tie back to today: the three registers <em>are</em> the three stats. A blue card has to <b>sound</b> Int, or the color is lying about what the card is.</p>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Notes for a small remote elective</h2>
+    <ul class="plain">
+      <li><b>The share has to work with four people.</b> It does — four characters read aloud is still a share. Don't apologize for the turnout or count heads out loud; it reframes a working class as a failed one.</li>
+      <li><b>Absentees are by design here.</b> Share this run sheet and the three-line brief in the class channel so someone who missed it can do the exercise alone and paste it late. Their character in Thursday's chat is worth more than perfect attendance.</li>
+      <li><b>Nothing today was a detour.</b> A lookup table, a set of constants, a data/code split, and a decision about what the data model refuses to store. If anyone asks whether this was a game design class or an engine class, the honest answer is that the distinction was the lesson.</li>
+    </ul>
+  </div>
+
+</div>

@@ -1,0 +1,579 @@
+<title>Day Loop &amp; Stat Triangle — 2h Run Sheet</title>
+<style>
+  :root {
+    --ground:    #FAF6EC;
+    --surface:   #F2EBDA;
+    --surface-2: #E7DEC7;
+    --ink:       #23212E;
+    --ink-dim:   #6B6579;
+    --rule:      #DCD2BC;
+    --rule-soft: #EAE1CE;
+    --int:       #2F55A8;
+    --cha:       #B03A45;
+    --sen:       #2E7A46;
+    --accent:    #2F55A8;
+    --warn-bg:   #F6E9D4;
+
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --serif: Charter, "Bitstream Charter", "Iowan Old Style", "Source Serif Pro", Georgia, serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:    #17161F;
+      --surface:   #211F2B;
+      --surface-2: #2C2838;
+      --ink:       #F5EDD9;
+      --ink-dim:   #948DA3;
+      --rule:      #383243;
+      --rule-soft: #2A2634;
+      --int:       #7A9FEC;
+      --cha:       #E4767F;
+      --sen:       #74CE8F;
+      --accent:    #7A9FEC;
+      --warn-bg:   #2E2739;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:    #17161F;
+    --surface:   #211F2B;
+    --surface-2: #2C2838;
+    --ink:       #F5EDD9;
+    --ink-dim:   #948DA3;
+    --rule:      #383243;
+    --rule-soft: #2A2634;
+    --int:       #7A9FEC;
+    --cha:       #E4767F;
+    --sen:       #74CE8F;
+    --accent:    #7A9FEC;
+    --warn-bg:   #2E2739;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 3rem 1.5rem 6rem;
+  }
+
+  .page { max-width: 54rem; margin: 0 auto; }
+
+  h1, h2, h3, .label, .clock, .mins {
+    font-family: var(--mono);
+    font-weight: 600;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    letter-spacing: 0.02em;
+    line-height: 1.3;
+    margin: 0 0 0.75rem;
+    text-wrap: balance;
+  }
+
+  h2 {
+    font-size: 0.8rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin: 0;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  h3 {
+    font-size: 1rem;
+    letter-spacing: 0.01em;
+    margin: 0;
+  }
+
+  p { margin: 0; }
+  a { color: var(--accent); }
+
+  .stack   { display: flex; flex-direction: column; gap: 1rem; }
+  .section { display: flex; flex-direction: column; gap: 1.25rem; margin-top: 3.25rem; }
+
+  header { display: flex; flex-direction: column; gap: 1rem; }
+
+  .lede { color: var(--ink-dim); font-size: 1.05rem; max-width: 42rem; }
+
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem;
+    font-family: var(--mono); font-size: 0.75rem;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink-dim);
+    padding-top: 1rem; border-top: 2px solid var(--ink);
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  /* ---- findings ---- */
+  .finding {
+    display: grid; grid-template-columns: 1fr; gap: 0.35rem;
+    padding: 1rem 0; border-bottom: 1px solid var(--rule-soft);
+  }
+  .finding:last-child { border-bottom: none; }
+  .path {
+    font-family: var(--mono); font-size: 0.78rem;
+    color: var(--accent); word-break: break-all;
+  }
+  .finding p { color: var(--ink-dim); font-size: 0.95rem; }
+  .finding b { color: var(--ink); font-weight: 600; }
+
+  /* ---- run sheet ---- */
+  .beat {
+    display: grid;
+    grid-template-columns: 4.5rem 1fr;
+    gap: 0 1.5rem;
+    padding: 1.1rem 0;
+    border-top: 1px solid var(--rule-soft);
+  }
+  .beat:first-child { border-top: 1px solid var(--rule); }
+
+  .clock {
+    font-size: 0.95rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    padding-top: 0.1rem;
+  }
+  .mins {
+    display: block;
+    font-size: 0.7rem; font-weight: 400;
+    letter-spacing: 0.06em;
+    color: var(--ink-dim);
+  }
+  .body { display: flex; flex-direction: column; gap: 0.55rem; min-width: 0; }
+  .why { color: var(--ink-dim); font-size: 0.95rem; }
+  .why em { color: var(--ink); font-style: italic; }
+
+  .files {
+    font-family: var(--mono); font-size: 0.74rem;
+    color: var(--ink-dim); letter-spacing: 0.01em;
+    word-break: break-all;
+  }
+  .files .new { color: var(--sen); }
+  .files .edit { color: var(--cha); }
+
+  .beat.check { background: var(--surface); }
+  .beat.check .clock, .beat.check .body { padding-left: 0; }
+  .beat.check h3 { color: var(--accent); }
+  .beat.check { padding-left: 1rem; padding-right: 1rem; margin: 0 -1rem; }
+
+  .cutline {
+    display: grid; grid-template-columns: 4.5rem 1fr; gap: 0 1.5rem;
+    align-items: center;
+    padding: 0.9rem 0;
+    border-top: 2px dashed var(--cha);
+    border-bottom: 2px dashed var(--cha);
+    margin: 0.5rem 0;
+  }
+  .cutline .label {
+    font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--cha);
+  }
+  .cutline p { font-size: 0.92rem; color: var(--ink-dim); }
+
+  /* ---- code ---- */
+  pre {
+    font-family: var(--mono); font-size: 0.76rem; line-height: 1.65;
+    background: var(--surface); color: var(--ink);
+    border-left: 2px solid var(--rule);
+    padding: 0.8rem 1rem; margin: 0;
+    overflow-x: auto;
+  }
+  pre .c { color: var(--ink-dim); }
+  code {
+    font-family: var(--mono); font-size: 0.85em;
+    background: var(--surface-2); padding: 0.08em 0.35em;
+    border-radius: 2px;
+  }
+
+  /* ---- tables ---- */
+  .tablewrap { overflow-x: auto; }
+  table {
+    border-collapse: collapse;
+    font-family: var(--mono); font-size: 0.74rem;
+    font-variant-numeric: tabular-nums;
+    min-width: 100%;
+  }
+  th, td {
+    text-align: right;
+    padding: 0.35rem 0.9rem 0.35rem 0;
+    border-bottom: 1px solid var(--rule-soft);
+    white-space: nowrap;
+  }
+  th {
+    font-weight: 600; color: var(--ink-dim);
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--rule);
+  }
+  td:last-child, th:last-child { padding-right: 0; color: var(--accent); }
+  tbody td:first-child, thead th:first-child { color: var(--ink-dim); }
+
+  /* ---- phase strip ---- */
+  .phases {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+    font-family: var(--mono); font-size: 0.72rem;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 0.9rem 1rem; background: var(--surface); overflow-x: auto;
+  }
+  .phase {
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--rule); color: var(--ink);
+    white-space: nowrap;
+  }
+  .arrow { color: var(--ink-dim); white-space: nowrap; }
+
+  /* ---- callout ---- */
+  .callout {
+    background: var(--warn-bg);
+    border-left: 3px solid var(--cha);
+    padding: 1.1rem 1.25rem;
+    display: flex; flex-direction: column; gap: 0.6rem;
+  }
+  .callout .label {
+    font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--cha);
+  }
+  .callout p { font-size: 0.95rem; }
+  .callout ul { margin: 0; padding-left: 1.1rem; color: var(--ink-dim); font-size: 0.95rem; }
+  .callout li { margin-bottom: 0.3rem; }
+
+  ul.plain { margin: 0; padding-left: 1.1rem; }
+  ul.plain li { margin-bottom: 0.4rem; }
+
+  @media (max-width: 40rem) {
+    html { font-size: 22px; }
+    body { padding: 2rem 1rem 4rem; line-height: 1.7; }
+    .beat, .cutline { grid-template-columns: 1fr; gap: 0.5rem; }
+    .clock { display: flex; align-items: baseline; gap: 0.6rem; }
+    .mins { display: inline; }
+    pre, code { line-height: 1.7; }
+  }
+</style>
+
+<div class="page">
+
+  <header>
+    <h1>The Day Loop &amp; The Stat Triangle</h1>
+    <p class="lede">One class, two features: the week starts passing, and the player can finally see the shape of who they're becoming. The hard part isn't either feature — it's the four things standing in front of them.</p>
+    <div class="meta">
+      <span><b>2h00</b> budget</span>
+      <span>CC3096 · <b>Small Talk</b></span>
+      <span>from <b>/UVG/card-game</b></span>
+      <span>ref <b>08-DayLoop</b> · <b>09-StatTriangle</b></span>
+    </div>
+  </header>
+
+  <div class="section">
+    <h2>What's in the way</h2>
+    <p class="lede" style="font-size:0.98rem;">Read from the class repo as it stands. The engine is in good shape — <code>setResource</code>, the <code>setup/update/draw/unload</code> hooks, <code>switchRequest</code>, <code>Screen</code> at 640×400 are all there. These four are what the day loop actually needs and doesn't have.</p>
+
+    <div class="stack" style="gap:0;">
+      <div class="finding">
+        <span class="path">src/engine/state/SaveFile.lua</span>
+        <p><b>Written, never called.</b> Nothing outside <code>src/engine/state/</code> references it. The engine half of lesson 05 landed; the game half — a <code>runState</code> resource that gets loaded and saved — never got wired. This is the gap you remembered.</p>
+      </div>
+      <div class="finding">
+        <span class="path">src/game/systems/MenuInputSystem.lua</span>
+        <p><b>No confirm branch.</b> Only left/right. Nothing ever spawns <code>activityPicked</code> — the event the entire day loop hangs off.</p>
+      </div>
+      <div class="finding">
+        <span class="path">src/engine/Game.lua</span>
+        <p><b>The sweep is too narrow.</b> <code>Game.update</code> destroys <code>keyPressed</code> entities specifically. An <code>activityPicked</code> event would never be swept — it would sit in the registry and re-fire every frame, forever.</p>
+      </div>
+      <div class="finding">
+        <span class="path">src/game/systems/TextboxSystem.lua</span>
+        <p><b>The typewriter is framerate-bound.</b> Progress is derived from <code>#textbox.visibleText</code> — an integer — so <code>#visibleText + speed*dt</code> floors straight back to <code>#visibleText</code> and it advances exactly one character per frame no matter what. <code>speed = 1</code> reads as one char per second and delivers sixty. Worth six minutes today, because the vignette needs its line to finish inside a fixed window.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>The shape of the day</h2>
+    <div class="phases">
+      <span class="phase">choosing</span>
+      <span class="arrow">— activityPicked →</span>
+      <span class="phase">vignette</span>
+      <span class="arrow">— 2.5s →</span>
+      <span class="phase">fade</span>
+      <span class="arrow">— 1.6s →</span>
+      <span class="phase">choosing</span>
+    </div>
+    <p class="why">One system owns every transition. The day advances at the fade's <em>midpoint</em>, when the screen is fully black — the oldest trick in transitions: change the world while nobody can see it. That midpoint is also where the autosave goes, because it's the one moment the world is consistent and the player can't act.</p>
+  </div>
+
+  <div class="section">
+    <h2>Run sheet</h2>
+
+    <div class="beat">
+      <span class="clock">0:00<span class="mins">8 min</span></span>
+      <div class="body">
+        <h3>Run it, and name the three lies</h3>
+        <p class="why">Launch the game. Pick an activity — nothing happens. The text box says <em>"Hello world this is a very long text…"</em>. Quit, relaunch, nothing was remembered. Frame the class: today the week actually passes, and it survives quitting.</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:08<span class="mins">8 min</span></span>
+      <div class="body">
+        <h3>Any event, one update</h3>
+        <p class="why">Generalize the sweep from <code>keyPressed</code> to an <code>event</code> marker component. <em>Teaching point:</em> events are broadcasts — writers spawn, readers poll, the runtime clears. Bevy's <code>Events&lt;T&gt;</code> work exactly this way.</p>
+<pre><span class="c">-- Game.update: was query("keyPressed")</span>
+for _, entity in ipairs(current.registry:query("event")) do
+    current.registry:destroy(entity)
+end
+
+<span class="c">-- Game.keypressed: tag it like everything else</span>
+current.registry:spawn({ event = true, keyPressed = { key = key } })</pre>
+        <p class="files"><span class="edit">edit</span> src/engine/Game.lua</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:16<span class="mins">7 min</span></span>
+      <div class="body">
+        <h3>Confirm spawns a pick</h3>
+        <p class="why"><em>Teaching point:</em> the input system doesn't know what an activity <em>is</em>, what happens when one is picked, or even that this menu is about activities. It announces and stops.</p>
+<pre>elseif event.key == "return" or event.key == "space" then
+    scene.registry:spawn({
+        event = true,
+        activityPicked = { option = menu.options[menu.cursor] },
+    })
+end</pre>
+        <p class="files"><span class="edit">edit</span> src/game/systems/MenuInputSystem.lua</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:23<span class="mins">6 min</span></span>
+      <div class="body">
+        <h3>Fix the typewriter</h3>
+        <p class="why"><b>The bug.</b> <code>speed</code> currently does nothing:</p>
+<pre>local count = #textbox.visibleText + textbox.speed * dt
+local cut   = math.floor(count)
+textbox.visibleText = textbox.text:sub(1, cut + 1)</pre>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>frame</th><th>#visibleText</th><th>count</th><th>cut</th><th>result</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>0</td><td>0.0167</td><td>0</td><td>1 char</td></tr>
+              <tr><td>2</td><td>1</td><td>1.0167</td><td>1</td><td>2 chars</td></tr>
+              <tr><td>3</td><td>2</td><td>2.0167</td><td>2</td><td>3 chars</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="why"><code>speed * dt</code> is 0.0167 and <code>math.floor</code> discards it <em>every frame</em>, so <code>cut</code> always lands back on <code>#visibleText</code> and <code>cut + 1</code> is always exactly one more character. One char per frame, whatever <code>speed</code> says.</p>
+        <p class="why"><em>Teaching point:</em> the accumulator is being read back out of the output. A string length is an integer — it cannot hold "2.7 characters revealed," so the fraction has nowhere to live between frames. Progress is a number that happens to <em>produce</em> a string.</p>
+        <p class="why">It's not quite inert, it's quantized: chars per frame is <code>floor(speed * dt) + 1</code>, so <code>speed</code> <b>selects from a ladder of multiples of the framerate</b> rather than scaling the rate. Everything below ~60 is identical; at 61 it jumps to 120 chars/sec. And because the ladder is built from <code>dt</code>, a student on a 144Hz laptop gets a typewriter 2.4× faster than yours.</p>
+        <p class="why"><em>Demo before fixing (2 keystrokes):</em> set <code>speed = 1</code>, then <code>speed = 50</code> — identical. Then <code>speed = 200</code> — suddenly fast <b>and</b> visibly chunky.</p>
+        <p class="why"><b>Fix 1 — the typewriter.</b> Keep progress as a float that persists, and let the render system derive the string. Drop <code>visibleText</code> from the component entirely.</p>
+<pre><span class="c">-- TextboxSetupSystem.setup</span>
+textbox = { text = "...", visibleChars = 0, speed = 30 }
+
+<span class="c">-- TextboxSystem.update</span>
+for _, textbox in scene.registry:each("textbox") do
+    textbox.visibleChars = math.min(
+        textbox.visibleChars + textbox.speed * dt,
+        #textbox.text)
+end
+
+<span class="c">-- TextboxRenderSystem.draw</span>
+love.graphics.printf(
+    textbox.text:sub(1, math.floor(textbox.visibleChars)),
+    pos.x + 10, pos.y + 10, size.w - 20, "left")</pre>
+        <p class="why">This is what the file split buys: the update system owns <em>time</em>, the render system owns <em>presentation</em>, and the component holds only state. No second field claiming the same truth — which is what caused the bug. <code>speed</code> now reads honestly as characters per second, framerate-independent.</p>
+        <p class="why"><em>Smaller live diff, if you prefer:</em> keep <code>visibleText</code> as a cached field and assign it from <code>visibleChars</code> — never the reverse.</p>
+        <p class="why"><b>Fix 2 — the missing key.</b> The system table is an array entry, not a named field, so <code>system.name</code> is <code>nil</code> and it shows up blank in the debug overlay's system list.</p>
+<pre><span class="c">-- src/game/systems/TextboxRenderSystem.lua, line 1</span>
+local TextBoxRenderSystem = { "textBoxRender" }        <span class="c">-- before</span>
+local TextBoxRenderSystem = { name = "textBoxRender" } <span class="c">-- after</span></pre>
+        <p class="files"><span class="edit">edit</span> TextboxSystem.lua · TextboxSetupSystem.lua · TextboxRenderSystem.lua</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:29<span class="mins">13 min</span></span>
+      <div class="body">
+        <h3>Content, state, and the save file finally used</h3>
+        <p class="why">Three small pieces at once. <code>activities.lua</code> is <em>only a table</em> — designers tune it, systems read it, nothing in it can have a bug that isn't a typo. <code>RunStateSystem</code> is where lesson 05 gets closed. <em>Teaching point:</em> run state is plain data precisely so saving is trivial.</p>
+<pre><span class="c">-- RunStateSystem.setup</span>
+local data = SaveFile.load()
+scene.registry:setResource("runState", data and data.runState or {
+    week = 1, day = 1,
+    stats = { int = 0, charm = 0, sense = 0 },
+})
+
+<span class="c">-- StatsSystem.update</span>
+for _, pick in scene.registry:each("activityPicked") do
+    local runState = scene.registry:resource("runState")
+    local stat = activities[pick.option].stat
+    runState.stats[stat] = runState.stats[stat] + 1
+end</pre>
+        <p class="files"><span class="new">new</span> src/game/data/activities.lua · RunStateSystem.lua · StatsSystem.lua</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:42<span class="mins">8 min</span></span>
+      <div class="body">
+        <h3>The vignette speaks</h3>
+        <p class="why"><em>Teaching point — the one to spend time on:</em> three systems now react to one <code>activityPicked</code> event, and none of them knows the others exist. Stats bumps a number, the vignette writes text, the day loop flips a phase.</p>
+<pre>for _, pick in scene.registry:each("activityPicked") do
+    local pool = activities[pick.option].lines
+    local _, textbox = scene.registry:first("textbox")
+    textbox.text = pool[love.math.random(#pool)]
+    textbox.visibleChars = 0   <span class="c">-- the typewriter's whole API</span>
+end</pre>
+        <p class="files"><span class="new">new</span> src/game/systems/VignetteSystem.lua</p>
+      </div>
+    </div>
+
+    <div class="beat check">
+      <span class="clock">0:50<span class="mins">5 min</span></span>
+      <div class="body">
+        <h3>Checkpoint · breathe</h3>
+        <p class="why">Pick an activity: a real line types out. Open the overlay (F1) and watch <code>runState.stats</code> move. Nothing is on screen yet that shows them — that's deliberate, the stats are hidden by design.</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:55<span class="mins">22 min</span></span>
+      <div class="body">
+        <h3>The day loop</h3>
+        <p class="why">The conceptual heart of the class. <em>Teaching point:</em> one system owns the phase and every transition. Smear a state machine across five files and nobody can say what state the day is in, or why. Note the guard going back into <code>MenuInputSystem</code> — the menu goes inert outside <code>choosing</code>, which is what makes one confirm key safe to share with every future listener.</p>
+<pre>elseif day.phase == "fade" then
+    if not day.flipped and day.timer &gt;= FADE_TIME / 2 then
+        day.flipped = true    <span class="c">-- screen is black: change the world</span>
+        runState.day = runState.day + 1
+        if runState.day &gt; 5 then
+            runState.day, runState.week = 1, runState.week + 1
+        end
+        SaveFile.save({ runState = runState })   <span class="c">-- autosave here</span>
+        textbox.text, textbox.visibleChars = PROMPT, 0
+    end
+    if day.timer &gt;= FADE_TIME then
+        day.phase, day.timer, day.flipped = "choosing", 0, false
+    end
+end</pre>
+        <p class="files"><span class="new">new</span> DayLoopSystem.lua &nbsp; <span class="edit">edit</span> MenuInputSystem.lua (choosing guard)</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">1:17<span class="mins">8 min</span></span>
+      <div class="body">
+        <h3>The fade</h3>
+        <p class="why"><em>Teaching point:</em> no scene switch, no canvas — the last render system in the list simply paints over everyone before it. Dumb on purpose: alpha is a pure function of the day loop's clock, and this system advances nothing.</p>
+<pre>local half = FADE_TIME / 2
+local alpha = day.timer &lt; half
+    and day.timer / half
+    or 1 - (day.timer - half) / half</pre>
+        <p class="files"><span class="new">new</span> src/game/systems/FadeRenderSystem.lua &nbsp;<span class="c">— add LAST in WeekScene</span></p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">1:25<span class="mins">7 min</span></span>
+      <div class="body">
+        <h3>The date, upper-left</h3>
+        <p class="why">Proof the clock moved. <em>Teaching point:</em> pure presentation owns no state — when the day loop flips the day behind the fade, the new date is simply what this system finds the next time it looks. Left column is status (date, then the triangle below it); right column is the menu.</p>
+        <p class="files"><span class="new">new</span> src/game/systems/DateRenderSystem.lua</p>
+      </div>
+    </div>
+
+    <div class="beat check">
+      <span class="clock">1:32<span class="mins">6 min</span></span>
+      <div class="body">
+        <h3>Checkpoint · the feature is done</h3>
+        <p class="why">Play Mon→Fri end to end. Then quit and relaunch: it should come back on the day you left. If this works, the class has already succeeded.</p>
+      </div>
+    </div>
+
+    <div class="cutline">
+      <span class="label">Cut line</span>
+      <p>Everything above is the day loop, complete and saving. If you reach 1:38 and it isn't running clean, <b>stop here</b> and make the triangle homework — the course plan already calls it the buffer lesson. Never ship a half-working state machine to thirty people's laptops.</p>
+    </div>
+
+    <div class="beat">
+      <span class="clock">1:38<span class="mins">20 min</span></span>
+      <div class="body">
+        <h3>The stat triangle</h3>
+        <p class="why">Zero dependencies on the day loop — it's pure presentation over <code>runState</code>. <em>Teaching point:</em> shape, not magnitude. The exact numbers stay hidden; the player reads that they're Int-heavy and Sense-lagging, and the fixed display ceiling makes the shape visibly fill toward the rim. Nothing in the game reads <code>DISPLAY_MAX</code> — the rim is representation, not rules. Your <code>palette.lua</code> earns its keep here: color each spoke by its stat.</p>
+<pre>local CX, CY, R = 76, 230, 44   <span class="c">-- above the textbox at y=300</span>
+local DISPLAY_MAX = 30          <span class="c">-- half a 60-pick run: heavy spec</span>
+
+local AXES = {
+  { stat = "int",   color = palette.int, angle = -math.pi / 2 },
+  { stat = "charm", color = palette.cha, angle = math.pi - math.pi / 6 },
+  { stat = "sense", color = palette.sen, angle = math.pi / 6 },
+}
+
+local function point(axis, f)
+  return CX + math.cos(axis.angle) * R * f,
+         CY + math.sin(axis.angle) * R * f
+end</pre>
+        <p class="why">One gotcha worth naming out loud: skip the fill while all three stats are zero — three corners on the center is a zero-area polygon, and LÖVE will not thank you.</p>
+        <p class="files"><span class="new">new</span> src/game/systems/RadarRenderSystem.lua</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">1:58<span class="mins">2 min</span></span>
+      <div class="body">
+        <h3>Wrap</h3>
+        <p class="why">Hand out homework, name what's next.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>System order in WeekScene</h2>
+    <p class="why">Worth putting on the projector — the order <em>is</em> the frame.</p>
+<pre>RunStateSystem      <span class="c">-- setup: the resource everything reads</span>
+MenuSetupSystem
+TextboxSetupSystem
+
+MenuInputSystem     <span class="c">-- input FIRST: it spawns the event</span>
+StatsSystem         <span class="c">-- three readers of activityPicked,</span>
+VignetteSystem      <span class="c">--   none aware of the others</span>
+DayLoopSystem
+TextboxSystem
+
+MenuRenderSystem    <span class="c">-- presentation</span>
+TextboxRenderSystem
+DateRenderSystem
+RadarRenderSystem
+FadeRenderSystem    <span class="c">-- LAST: it paints over everyone</span></pre>
+  </div>
+
+  <div class="section">
+    <h2>Pack generation</h2>
+    <div class="callout">
+      <span class="label">Doesn't fit today</span>
+      <p>Not close, and it's worth being honest about why rather than starting it and abandoning it at 1:55.</p>
+      <ul>
+        <li>There's <b>no reference implementation to work from</b> — the <code>10-PackGeneration</code> branch contains one commit, and it's an art asset.</li>
+        <li>It's a fresh design, not a transcription: weighted primary-stat pick, stat-bounded rolls, phrase pools per stat. <b>60–90 minutes minimum</b>, and live design goes slower than live typing.</li>
+        <li>It needs the <b>card data model decided first</b>. That decision made under time pressure at the end of a class is a decision you'll be unwinding for the rest of the semester.</li>
+      </ul>
+      <p><b>Prep instead:</b> settle the card schema before next class — what fields a card has, and which of them are rolled versus derived. Then pack generation is a transcription lesson too, and it fits comfortably in its own slot.</p>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Homework</h2>
+    <ul class="plain">
+      <li><b>Fill the pools.</b> <code>activities.lua</code> ships with 5 lines each; the GDD asks for 5–8 so repeats feel alive. Pure content — no code, no excuses.</li>
+      <li><b>Tune <code>DISPLAY_MAX</code>.</b> Play a week, then argue for a different ceiling. There's no right answer, which is the point.</li>
+      <li><b>Add a fourth activity</b> — rest, or a job. Notice what breaks: the menu layout is hardcoded to three, and the triangle has exactly three axes. That's a real lesson about where "data-driven" stopped.</li>
+      <li><b>If the triangle got cut:</b> build it from the run sheet above.</li>
+    </ul>
+  </div>
+
+</div>

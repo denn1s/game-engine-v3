@@ -63,7 +63,8 @@ function RadarRenderSystem.draw(scene)
     -- the shape: each corner at its stat's share of the ceiling,
     -- pinned to the rim once it's past. Skipped while everything is
     -- zero — all three corners would sit on the center, and a
-    -- zero-area polygon is not a polygon
+    -- zero-area polygon is not a polygon (the generator also rejects that
+    -- invalid debug state; ordinary runs begin at 1/1/1)
     if stats.int + stats.charm + stats.sense > 0 then
         local shape = {}
         for _, axis in ipairs(AXES) do

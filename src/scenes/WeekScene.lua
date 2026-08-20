@@ -31,7 +31,10 @@ return function(payload)
         data and data.runState or {
             week = 1,
             day = 1, -- 1..5, Mon-Fri
-            stats = { int = 0, charm = 0, sense = 0 },
+            -- The GDD starts at 1/1/1. Besides giving the protagonist a
+            -- baseline, a non-zero total makes weighted generation defined.
+            stats = { int = 1, charm = 1, sense = 1 },
+            collection = {},
         })
 
     -- SCENE state, by contrast: the day loop's phase machine lives and
