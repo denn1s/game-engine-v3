@@ -1,15 +1,13 @@
 ----------------------------------------------------------------------
--- Lesson 06: the game proper begins.
+-- Lesson 13: the map — part 1, a sprite that moves.
 --
--- Pong is gone (it lives on in the earlier branches). What remains is
--- the ENGINE it forced us to build: Game (scene switching), Scene
--- (systems + registry), Registry (entities, components, resources),
--- Screen (logical resolution), the save file, and the debug overlay.
---
--- This file only bootstraps: register scenes, start one, hand the
--- callbacks to the Game. Key presses still enter the world as DATA:
--- the Game turns each one into a `keyPressed` event entity in the
--- current scene's registry — unless the overlay consumed them first.
+-- The engine is complete enough now to stop explaining itself and start
+-- being used. This file only bootstraps: register scenes, start one, hand
+-- the callbacks to the Game. Key presses still enter the world as DATA:
+-- the Game turns each one into a `keyPressed` event entity in the current
+-- scene's registry — unless the overlay consumed them first. (Walking is
+-- the exception: continuous held-keys are polled, not evented — see
+-- MapInputSystem.)
 ----------------------------------------------------------------------
 
 local Game = require("src.Game")
@@ -21,10 +19,12 @@ function love.load(args)
     Game.registerScene("packLab", require("src.scenes.PackLabScene"))
     Game.registerScene("collection", require("src.scenes.CollectionScene"))
     Game.registerScene("animLab", require("src.scenes.AnimationLabScene"))
+    Game.registerScene("map", require("src.scenes.MapScene"))
 
-    -- The generator's balancing instrument remains available in the debug
-    -- scene switcher; lesson 11 starts where those generated cards will live.
-    Game.start("collection")
+    -- The card pipeline is finished, so the game opens on the new subject:
+    -- the world the characters will walk between dates. The raising sim and
+    -- card scenes stay reachable from the debug scene switcher.
+    Game.start("map")
 
     attachDebugOverlay(Game)
     if args[1] == "--debug" then

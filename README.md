@@ -1,375 +1,226 @@
-# Lesson 11 — Procedural card identity
+# Lesson 13 — The map, part 1: a sprite that moves
 
-Last class, randomness decided **which card exists**. Today, randomness decides
-**what that card looks like**. Those jobs need opposite behavior:
+Phase 3 begins. Over three classes we build the world the characters walk
+between dates:
 
-```text
-gameplay RNG       surprise me
-presentation RNG   remember me
-```
+| Lesson | The question | Adds a system that… |
+|---|---|---|
+| **13 (today)** | what makes a thing move? | turns held keys into position + facing + animation |
+| 14 | what makes a place? | draws a tile grid (with autotiling) under the feet |
+| 15 | what makes a wall and a door? | pushes back on solid tiles, launches a date |
 
-A generated pack should be uncertain. Once a card exists, however, its picture
-must survive a redraw, a scene change, and a restart. The same card data must
-always become the same visual identity.
+Today the map is a floor and one character. No tiles, no walls. That is the
+point: every system here answers exactly one question, and nothing is in the
+way of seeing that.
 
-This class also introduces the collection browser, but its navigation, paging,
-layout, and detail panel arrive as scaffold. They are not today's intellectual
-work. The class designs and implements the transformation from three numbers to
-one recognizable picture.
+Last class (12) the Animation Lab asked *how does a sprite come alive?* and
+answered it with a clock on a demo wall. Today the player drives that clock.
+The lab paid off — `SpriteRenderSystem` and `SpriteAnimationSystem` are the
+lab's systems, promoted into the engine and stripped of every demo.
 
 ## Run it
 
 ```bash
 love .
-luajit tests/card_art.lua
-luajit tests/generation.lua
+luajit tests/movement.lua
 ```
 
-The game opens in the collection browser. Use the arrow keys to move, and
-Home/End to jump to the first or last card. Run with `love . --debug` to switch
-back to the Pack Lab; generate and replay a pack to see that replayed data also
-replays its pictures.
+The game opens on the map. **Arrows or WASD** walk the protagonist. **N**
+toggles diagonal normalization so you can feel the difference. The debug
+scene switcher (`love . --debug`) still reaches the raising sim and the card
+scenes.
 
 ## Instructor preparation
 
-This branch has two deliberately separate code commits:
+This is a full build from the Animation Lab base — no scaffold to hand out,
+the whole thing is live-codeable in ninety minutes because each file is small.
+If you want a head start, pre-place `MapScene.lua` and the two *reused*
+systems (`SpriteRenderSystem`, `SpriteAnimationSystem`) and live-code only
+the three NEW movement files. Do not type the HUD — it is readout plumbing.
 
-| Commit | Purpose |
-|---|---|
-| `4abdabb` | Pre-made collection browser: input, selection, paging, layout, detail panel |
-| `bb32523` | Reference solution: procedural recipe, renderer integration, tests |
-
-Begin the class from `4abdabb`. Do not live-type the collection scene. Show its
-systems for five minutes so students know what they received, then leave it
-alone.
-
-The completed `CardRenderer.lua` is also suitable as instructor-provided
-plumbing. Its job is to turn a finished visual recipe into LÖVE draw calls. The
-three useful live-code targets are in `CardArt.lua`:
-
-1. `seed` — card values become stable identity;
-2. `rankedStats` and symbol sizing — data becomes visual hierarchy;
-3. `describe` — local randomness and HSL color become a drawing recipe.
-
-Do not try to type both files from an empty screen in ninety minutes. Either
-provide `CardRenderer.lua` before class or reveal it after the room has designed
-the rules. Walk through one shape function and the clipping boundary; summarize
-the other drawing calls as implementation of the agreed contract.
+The one genuinely non-obvious idea is why movement **polls** `love.keyboard.isDown`
+while every other input in the game reads `keyPressed` events. That contrast
+is a learning goal, not an oversight — see "Two kinds of input" below.
 
 ## Learning goals
 
 By the end, students should be able to explain:
 
-- why procedural visuals need deterministic randomness;
-- why render-time randomness must not touch gameplay's global RNG;
-- how one value can be encoded redundantly with color and shape;
-- why proportional **area** requires a square root when calculating width;
-- why hue interpolation preserves identity better than RGB averaging;
-- why `CardArt` is a transformation while collection rendering is an ECS
-  system.
+- why walking can't ride the `keyPressed` event pipeline the menus use
+  (continuous state vs. discrete action);
+- where `dt` first becomes load-bearing: **speed is authored in px/sec**;
+- why a diagonal is `sqrt(2)` too fast, and normalizing the vector fixes it;
+- how **two systems write one entity** without talking (movement picks the
+  row, animation picks the frame);
+- why the pure `Movement` module is testable without a window while the
+  systems around it are not.
 
-The code is done when any card can render at any rectangle and equal card data
-produces equal pictures.
+The code is done when the character walks on all eight headings at equal
+speed, faces the way it travels, animates while moving and idles while still.
 
 ## The 90-minute class
 
-### 0–8 min — Cold read
+### 0–10 min — Spawn something you can look at
 
-Screen-share the completed collection for about ten seconds, then hide the
-detail panel or simply ask students not to read it.
+Write the `player` entity: `position`, `moveIntent`, `velocity`, `sprite`,
+`clipAnim` — five plain tables, no "Player" class. Reuse the lab's
+`SpriteRenderSystem` to draw it, `MapBackgroundSystem` to give it a floor. It
+just sits there, facing down.
 
-Ask in Discord chat:
+Say the quiet thing out loud: **an entity is not a thing, it is a row of
+components.** The "character" is whatever the systems downstream agree to
+read. That's why we can drive it by data.
 
-```text
-Pick one visible card.
-1. What is its strongest stat?
-2. What is probably second?
-3. What visual evidence did you use?
-```
+### 10–25 min — Two kinds of input, and why they differ
 
-Everybody posts at once. Simultaneous chat answers prevent the first confident
-voice from becoming the room's answer.
+The engine has one input rule so far (MenuInputSystem, lesson 06): a key press
+arrives as a `keyPressed` event entity, and systems read it once. Ask the
+room: *can I walk by pressing a key?* No — an event says "it happened," not
+"it's still happening." You **hold** a key.
 
-Do not correct anyone immediately. If people disagree, that is evidence about
-the visual language, not a student mistake.
-
-### 8–16 min — Two jobs for randomness
-
-Return to the previous lesson's replay seed:
-
-1. Generate a pack in the Pack Lab.
-2. Record the cards and their pictures.
-3. Replay the seed.
-4. Confirm both the data and pictures return.
-
-Then ask what would happen if rendering called `love.math.random()` every
-frame. The card would crawl, flicker, and consume random values that gameplay
-expected to use later.
-
-State today's invariant:
-
-> Drawing is allowed to look random. It is not allowed to change history.
-
-### 16–29 min — Six-seat design review
-
-There are only three decisions. Assign two students to each one in the main
-Discord channel; no breakout rooms are needed.
-
-Post these cards:
-
-```lua
-A = { primary = "int",   stats = { int = 10, charm = 2,  sense = 0 } }
-B = { primary = "charm", stats = { int = 4,  charm = 10, sense = 8 } }
-C = { primary = "sense", stats = { int = 1,  charm = 1,  sense = 1 } }
-```
-
-Assign:
-
-| Seats | One decision | Forced choices |
-|---|---|---|
-| 1–2 | Size | Relative within each card, or absolute across the whole run? What does zero draw? |
-| 3–4 | Placement | Fixed slots, or seeded positions? Can symbols overlap? |
-| 5–6 | Color | Primary only, or primary tinted by secondary? Should weak and strong versions share a palette? |
-
-Give everyone ninety silent seconds. Each student posts exactly this:
+So `MapInputSystem` breaks the pattern deliberately: it **polls**
+`love.keyboard.isDown` every frame and writes raw `-1/0/1` axes into
+`moveIntent`. Establish the rule that will outlive this lesson:
 
 ```text
-Choice:
-One reason:
-One failure case:
+discrete action   confirm, jump, pick a menu   -> keyPressed event entity
+continuous state  walk, steer, aim             -> poll the device
 ```
 
-Spend another five minutes resolving the three decisions as a room. When the
-room is split, use the GDD's intended reading test: the picture communicates a
-card's **build**, while the detail panel communicates exact strength.
+Reinforce the budget: an input system only **fills components** (intent, and
+one resource flag). It never touches position.
 
-If fewer than six students attend, give one student a whole row. If discussion
-is slow, use the shipped decisions below and ask students to attack them rather
-than invent alternatives from nothing.
+### 25–45 min — Intent becomes a place (the math beat)
 
-### 29–37 min — Freeze the contract
+`MovementSystem` spends the intent. The integration is two lines:
 
-Write the chosen rules before opening the editor. The reference implementation
-uses:
+```lua
+pos.x = pos.x + velocity.x * dt
+pos.y = pos.y + velocity.y * dt
+```
 
-- Intelligence: blue square;
-- Charm: red circle;
-- Sense: green triangle;
-- values normalized against the largest value on that card;
-- zero draws no symbol;
-- symbol area grows with value;
-- largest symbols draw first so smaller ones remain visible above them;
-- positions come from a card-local seeded RNG;
-- overlap is allowed;
-- background starts at the primary hue and moves at most 45% toward the
-  strongest off-stat;
-- saturation and lightness remain fixed;
-- exact phrase and numbers live in the detail panel.
+Stop and make the claim: `speed` is `150`, which means **pixels per second**,
+and that sentence only means something because of `dt`. This is the first
+number in the game written in real units — at 60fps you move 2.5px a frame,
+at 30fps 5px a frame, and the same 150px a second.
 
-This is the design spec. From this point onward, code is judged against it.
+Then hold **right + down**. Watch the HUD arrow grow. Walk into a corner and
+you cover `sqrt(2) ≈ 1.41`× the ground you do on one axis. This is a **bug**,
+and every engine ships it until someone normalizes the vector:
 
-### 37–44 min — Tour the scaffold
+```lua
+-- Movement.direction, pure:
+local rawMag = math.sqrt(dx*dx + dy*dy)
+return dx / rawMag, dy / rawMag, rawMag   -- unit length, same distance every way
+```
 
-Show the pre-made systems in their execution order:
+Press **N** to flip it off live and feel diagonals zoom. The green arrow is
+what you actually move; the red ghost is what an unnormalized engine would.
+On an axis they overlap; on a diagonal the red outruns. Let two students drive
+it and describe what they see before you name `sqrt(2)`.
+
+### 45–60 min — Which way does it face, and is it walking?
+
+`MovementSystem` also picks the sprite **row** from the dominant axis
+(`Movement.facing`), and sets one boolean: `clipAnim.playing = moving`.
+
+It does **not** touch `frame`. Point at `SpriteAnimationSystem` and show that
+it reads `playing`: while true it advances `t` and picks a walk frame; while
+false it shows the idle frame and rewinds `t` so the next step starts on the
+plant, not mid-stride.
 
 ```text
-CollectionInputSystem
-        key press -> move request
-
-CollectionSelectionSystem
-        move request -> selected index and visible page
-
-CollectionChromeRenderSystem
-        background, title, count and controls
-
-CollectionGridRenderSystem
-        page of cards and cursor
-
-CardDetailRenderSystem
-        selected phrase and exact numbers
+MovementSystem   -> position, sprite.row, clipAnim.playing   (WHERE, WHICH WAY, WALKING?)
+SpriteAnimation  -> sprite.frame                             (WHICH FOOT IS DOWN)
 ```
 
-Point out what is deliberately absent: input does not clamp a cursor, selection
-does not draw, the grid does not know the exact-value layout, and no one owns a
-catch-all collection system.
+Two systems, one `sprite` component, neither knows the other exists. This is
+the lab's demo-5 combo ("a clip and a tween on one entity, neither aware of
+the other") showing up as real architecture. Teleporting the player would run
+one and not the other — and you'll be glad they're separate at lesson 15 when
+collision *stops* movement but the idle animation keeps running.
 
-The scene temporarily generates a deterministic twelve-card gallery when the
-save has no collection. This is a classroom fixture, not the Saturday flow.
-Lesson 12 will remove it when Week → pack → browse exists.
+### 60–75 min — The wrap, and what it's pretending to be
 
-### 44–59 min — Stable visual identity
+The character walks off the edge and pops back on the other side. Say plainly
+that this is a **placeholder** chosen so a wandering student can't get lost —
+and that it **becomes collision in two classes.** The last thing today wants
+is to make walls real; today only wants the door for them installed.
 
-Start with the card seed. A seed is derived only from serializable card data:
+Tour the final system list. Note draw-only and update-only systems share one
+ordered list safely, because `Scene` runs `update()` and `draw()` as two
+passes: floor, then sprite, then HUD readouts on top.
 
-```lua
-function CardArt.seed(card)
-    local stats = card.stats
-    local primary = PRIMARY_INDEX[card.primary]
-    return (stats.int * 73856093
-        + stats.charm * 19349663
-        + stats.sense * 83492791
-        + primary * 26544357) % 2147483646 + 1
-end
-```
+### 75–85 min — Refactor toward the pure core
 
-The constants are merely large, distinct mixing constants. They are not secret
-and this is not cryptography. The promise matters more than the particular
-numbers: equal input gives equal seed.
+Pull the normalization and facing math **out** of the system and into
+`src/world/Movement.lua`, leaving `MovementSystem` as a thin adapter. Ask
+why: a system needs a registry, a scene, and a window; a *decision* needs
+only its inputs. This mirrors CardArt last class — transformation vs. system.
 
-The renderer builds a private generator:
-
-```lua
-local rng = love.math.newRandomGenerator(CardArt.seed(card))
-local random = function(...) return rng:random(...) end
-```
-
-Contrast it with both dangerous alternatives:
-
-```lua
-love.math.random()             -- consumes gameplay's shared sequence
-love.math.setRandomSeed(seed)  -- rewinds gameplay's shared sequence
-```
-
-The local generator may be consumed freely without changing the next pack or
-hand.
-
-### 59–70 min — Value becomes size
-
-Sort the three stats by value, retaining a stable stat order for ties. Skip
-zeros. Normalize every non-zero value against the largest value on that card.
-
-If diameter were directly proportional to value, a value of 10 would have one
-hundred times the area of a value of 1. Use a square root:
-
-```lua
-local proportion = entry.value / maximum
-local size = math.max(0.15, 0.46 * math.sqrt(proportion))
-```
-
-The `0.15` floor is a presentation compromise: a real non-zero off-stat should
-remain visible on an 86×116 thumbnail. It means very small values are no longer
-perfectly area-proportional. Name that compromise instead of hiding it.
-
-Ask whether `A` and `{ int = 20, charm = 4, sense = 0 }` should share a
-silhouette. In this design they do: the image says “specialist,” while the
-detail panel distinguishes strength.
-
-### 70–78 min — Primary plus secondary color
-
-RGB interpolation changes red and green by lowering and raising three channels;
-the midpoint often loses the vividness that made either endpoint legible. Here,
-the variables have clearer jobs:
-
-```text
-hue          which stat family?
-saturation   how colorful?       fixed
-lightness    how bright?          fixed
-```
-
-Interpolate hue on a circle, taking the shortest direction. Red near 360° and
-blue near 218° must not take an accidental long trip through unrelated hues.
-
-The secondary influence is capped below half:
-
-```lua
-local influence = math.min(
-    secondaryValue / (primaryValue + secondaryValue),
-    0.45)
-```
-
-That cap is a design claim: a hybrid should be visible, but its pack category
-should remain readable.
-
-### 78–85 min — Render and challenge it
-
-Run the collection. Use the cold-read questions again. Then inspect these edge
-cases:
-
-- one non-zero stat;
-- three equal stats;
-- a primary whose rolled value is not the largest value;
-- a value of zero;
-- two cards with identical values;
-- an 86×116 grid card versus a differently sized card.
-
-Do not ask merely whether the scene “looks good.” Ask whether it fulfills the
-written visual contract.
-
-### 85–90 min — Test and exit ticket
-
-Run:
+Run the test.
 
 ```bash
-luajit tests/card_art.lua
+luajit tests/movement.lua
 ```
 
-The test checks promises, not a screenshot:
+It checks promises, not pixels: every direction is unit speed, un-normalized
+diagonals really are `sqrt(2)`, the four cardinals map to the four rows,
+ties prefer horizontal, standing still invents no facing.
 
-- equal data produces the same seed and positions;
-- zero-valued stats disappear;
-- the largest value produces the largest symbol;
-- the strongest off-stat supplies the secondary hue;
-- secondary influence cannot steal primary identity;
-- generated RGB channels remain valid.
+### 85–90 min — Exit ticket (Discord)
 
-Exit ticket, posted in Discord:
+1. Why can't walking use the same `keyPressed` events that the menu uses?
+2. A player holds up-left. Name the three components that change and which
+   system changes each.
+3. If we deleted `dt` from the integration, what would break — and would the
+   test still pass?
 
-1. Which randomness in today's code must be unpredictable?
-2. Which randomness must be reproducible?
-3. Name one visual ambiguity the current generator still has.
-
-## Architecture underneath the picture
+## Architecture underneath the movement
 
 ```text
-card plain data
-     |
-     v
-CardArt.describe       pure visual policy
-     |
-     v
-visual recipe          background + ordered normalized symbols
-     |
-     v
-CardRenderer.draw      LÖVE drawing primitive
-     |
-     +----------+----------------+
-     v          v                v
-collection   pack lab       future date hand
+love.keyboard (held)        MapInputSystem
+    arrows / WASD          -> moveIntent {dx,dy}        (poll, not event)
+                                    |
+                                    v
+                             Movement.direction  (pure)   <- the sqrt(2) fix
+                             Movement.facing     (pure)   <- dominant axis
+                                    |
+                                    v
+                             MovementSystem
+        moveIntent + map.speed  -> position, velocity, sprite.row,
+                                   clipAnim.playing
+                                    |                    \
+                                    v                     v
+                          SpriteAnimationSystem     (position+sprite)
+                            playing + t -> sprite.frame   SpriteRenderSystem
+                                                            path->quad->blit
 ```
 
-`CardArt` is not an ECS system. It transforms one value into another and needs
-no registry, scene, entity, or graphics window. That is why its test runs under
-plain LuaJIT.
-
-`CardRenderer` is also not a screen-level system. It is the reusable primitive
-for drawing one card at a requested rectangle. Systems decide which cards are
-visible, where they go, and what interaction surrounds them.
-
-This is the same boundary used last class: generators are transformations;
-systems adapt transformations to the running world.
+The three boxes on the left of the fold are **today's new code**; the two
+below it are the Animation Lab, promoted. `Movement.lua` is the only file the
+test imports — the rest needs a window.
 
 ## Deliberate limitations
 
-- The visual seed does not include the phrase. Equal primary/stat data produces
-  the same composition even if the phrases differ. Add a stable phrase hash if
-  prose should be part of identity.
-- Overlap is permitted but not optimized. A later polish pass could reject
-  placements that hide too much of a smaller symbol.
-- Shapes encode color redundantly, but the current palette still needs testing
-  with actual color-vision simulations.
-- The collection uses pages rather than smooth scrolling. That interaction and
-  pack reveal animation belong to lesson 12.
-- The lesson gallery is not saved and does not represent a free pack.
+- **Wrap, not walls.** Walking off-screen is undefined behavior papered over
+  with a torus. Lesson 15 replaces the whole `-- placeholder wrap` block with
+  collision against solid tiles.
+- **Facing is instantaneous.** Real characters turn over a step or two, and
+  prefer the *last* direction over a fixed horizontal tie-break. Both are
+  polish; the memory-free dominant-axis rule is honest about what it is.
+- **`clipAnim.playing` is one boolean.** The moment we want idle, walk, run,
+  and hurt clips per row we need an animation **state** — and where those
+  transitions live is the lesson-15 conversation, not today's.
+- **One player, hardcoded.** Nothing says `moveIntent` can't drive three
+  characters — but who owns "which entity is the player" is a scene-flow
+  question we defer.
 
 ## Next class
 
-Turn the browser into the Saturday scene with two entry modes:
-
-```text
-pack mode:        SLIDE_IN -> FLIPPING -> BROWSING
-collection mode:                         BROWSING
-```
-
-The card renderer is finished, so the next lesson can concentrate on UI state,
-tweening, staggered reveals, new-card highlighting, and the transition from the
-Week scene instead of drawing the same card again.
+Lesson 14 puts the floor under those feet: a tile grid, a `TileMapRenderSystem`
+in place of the flat-color `MapBackgroundSystem`, and **autotiling** — a
+`ground`/`edge`/`corner` lookup that decides each tile's art from its
+neighbors, so painting one tile updates four. The character walks across it
+unchanged, which is the reward for keeping movement independent of what it
+stands on.
