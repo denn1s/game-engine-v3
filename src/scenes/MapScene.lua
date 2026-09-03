@@ -6,10 +6,11 @@
 -- every system here answering exactly one question.
 --
 -- Look at how little this scene has to say. The story of the whole
--- lesson is five systems in a list and one entity:
+-- lesson is a list of single-question systems and one entity:
 --
 --   MapInputSystem        held keys          -> moveIntent (raw -1/0/1)
---   MovementSystem        moveIntent         -> position, sprite.row, playing
+--   MovementSystem        moveIntent         -> velocity, position
+--   SpriteFacingSystem    moveIntent         -> sprite.row, playing (+ wrap)
 --   SpriteAnimationSystem clipAnim + playing -> sprite.frame
 --   MapBackgroundSystem   (floor)            -> behind everything
 --   SpriteRenderSystem    position + sprite  -> the pixels
@@ -25,6 +26,7 @@ local SpriteClip = require("src.anim.SpriteClip")
 
 local MapInputSystem = require("src.systems.MapInputSystem")
 local MovementSystem = require("src.systems.MovementSystem")
+local SpriteFacingSystem = require("src.systems.SpriteFacingSystem")
 local SpriteAnimationSystem = require("src.systems.SpriteAnimationSystem")
 local MapBackgroundSystem = require("src.systems.MapBackgroundSystem")
 local SpriteRenderSystem = require("src.systems.SpriteRenderSystem")
@@ -69,6 +71,7 @@ return function(payload)
     -- Scene runs update() and draw() in two passes over the same order.
     scene:addSystem(MapInputSystem)
     scene:addSystem(MovementSystem)
+    scene:addSystem(SpriteFacingSystem)
     scene:addSystem(SpriteAnimationSystem)
     scene:addSystem(MapBackgroundSystem)
     scene:addSystem(SpriteRenderSystem)
