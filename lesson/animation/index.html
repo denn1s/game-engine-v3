@@ -1,0 +1,700 @@
+<title>Time, Eased — The Animation Lab · 2h Run Sheet</title>
+<style>
+  :root {
+    --ground:    #FAF6EC;
+    --surface:   #F2EBDA;
+    --surface-2: #E7DEC7;
+    --ink:       #23212E;
+    --ink-dim:   #6B6579;
+    --rule:      #DCD2BC;
+    --rule-soft: #EAE1CE;
+    --int:       #2F55A8;
+    --cha:       #B03A45;
+    --sen:       #2E7A46;
+    --accent:    #2F55A8;
+    --warn-bg:   #F6E9D4;
+
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --serif: Charter, "Bitstream Charter", "Iowan Old Style", "Source Serif Pro", Georgia, serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:    #17161F;
+      --surface:   #211F2B;
+      --surface-2: #2C2838;
+      --ink:       #F5EDD9;
+      --ink-dim:   #948DA3;
+      --rule:      #383243;
+      --rule-soft: #2A2634;
+      --int:       #7A9FEC;
+      --cha:       #E4767F;
+      --sen:       #74CE8F;
+      --accent:    #7A9FEC;
+      --warn-bg:   #2E2739;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:    #17161F;
+    --surface:   #211F2B;
+    --surface-2: #2C2838;
+    --ink:       #F5EDD9;
+    --ink-dim:   #948DA3;
+    --rule:      #383243;
+    --rule-soft: #2A2634;
+    --int:       #7A9FEC;
+    --cha:       #E4767F;
+    --sen:       #74CE8F;
+    --accent:    #7A9FEC;
+    --warn-bg:   #2E2739;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 3rem 1.5rem 6rem;
+  }
+
+  .page { max-width: 54rem; margin: 0 auto; }
+
+  h1, h2, h3, .label, .clock, .mins {
+    font-family: var(--mono);
+    font-weight: 600;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    letter-spacing: 0.02em;
+    line-height: 1.3;
+    margin: 0 0 0.75rem;
+    text-wrap: balance;
+  }
+
+  h2 {
+    font-size: 0.8rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin: 0;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  h3 {
+    font-size: 1rem;
+    letter-spacing: 0.01em;
+    margin: 0;
+  }
+
+  p { margin: 0; }
+  a { color: var(--accent); }
+
+  .stack   { display: flex; flex-direction: column; gap: 1rem; }
+  .section { display: flex; flex-direction: column; gap: 1.25rem; margin-top: 3.25rem; }
+
+  header { display: flex; flex-direction: column; gap: 1rem; }
+
+  .lede { color: var(--ink-dim); font-size: 1.05rem; max-width: 42rem; }
+
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem;
+    font-family: var(--mono); font-size: 0.75rem;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink-dim);
+    padding-top: 1rem; border-top: 2px solid var(--ink);
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  /* ---- findings ---- */
+  .finding {
+    display: grid; grid-template-columns: 1fr; gap: 0.35rem;
+    padding: 1rem 0; border-bottom: 1px solid var(--rule-soft);
+  }
+  .finding:last-child { border-bottom: none; }
+  .path {
+    font-family: var(--mono); font-size: 0.78rem;
+    color: var(--accent); word-break: break-all;
+  }
+  .finding p { color: var(--ink-dim); font-size: 0.95rem; }
+  .finding b { color: var(--ink); font-weight: 600; }
+
+  /* ---- run sheet ---- */
+  .beat {
+    display: grid;
+    grid-template-columns: 4.5rem 1fr;
+    gap: 0 1.5rem;
+    padding: 1.1rem 0;
+    border-top: 1px solid var(--rule-soft);
+  }
+  .beat:first-child { border-top: 1px solid var(--rule); }
+
+  .clock {
+    font-size: 0.95rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    padding-top: 0.1rem;
+  }
+  .mins {
+    display: block;
+    font-size: 0.7rem; font-weight: 400;
+    letter-spacing: 0.06em;
+    color: var(--ink-dim);
+  }
+  .body { display: flex; flex-direction: column; gap: 0.55rem; min-width: 0; }
+  .why { color: var(--ink-dim); font-size: 0.95rem; }
+  .why em { color: var(--ink); font-style: italic; }
+
+  .files {
+    font-family: var(--mono); font-size: 0.74rem;
+    color: var(--ink-dim); letter-spacing: 0.01em;
+    word-break: break-all;
+  }
+  .files .new { color: var(--sen); }
+  .files .edit { color: var(--cha); }
+
+  .beat.check { background: var(--surface); }
+  .beat.check .clock, .beat.check .body { padding-left: 0; }
+  .beat.check h3 { color: var(--accent); }
+  .beat.check { padding-left: 1rem; padding-right: 1rem; margin: 0 -1rem; }
+
+  .cutline {
+    display: grid; grid-template-columns: 4.5rem 1fr; gap: 0 1.5rem;
+    align-items: center;
+    padding: 0.9rem 0;
+    border-top: 2px dashed var(--cha);
+    border-bottom: 2px dashed var(--cha);
+    margin: 0.5rem 0;
+  }
+  .cutline .label {
+    font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--cha);
+  }
+  .cutline p { font-size: 0.92rem; color: var(--ink-dim); }
+
+  /* ---- code ---- */
+  pre {
+    font-family: var(--mono); font-size: 0.76rem; line-height: 1.65;
+    background: var(--surface); color: var(--ink);
+    border-left: 2px solid var(--rule);
+    padding: 0.8rem 1rem; margin: 0;
+    overflow-x: auto;
+  }
+  pre .c { color: var(--ink-dim); }
+  code {
+    font-family: var(--mono); font-size: 0.85em;
+    background: var(--surface-2); padding: 0.08em 0.35em;
+    border-radius: 2px;
+  }
+
+  /* ---- tables ---- */
+  .tablewrap { overflow-x: auto; }
+  table {
+    border-collapse: collapse;
+    font-family: var(--mono); font-size: 0.74rem;
+    font-variant-numeric: tabular-nums;
+    min-width: 100%;
+  }
+  th, td {
+    text-align: right;
+    padding: 0.35rem 0.9rem 0.35rem 0;
+    border-bottom: 1px solid var(--rule-soft);
+    white-space: nowrap;
+  }
+  th {
+    font-weight: 600; color: var(--ink-dim);
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--rule);
+  }
+  td:last-child, th:last-child { padding-right: 0; color: var(--accent); }
+  tbody td:first-child, thead th:first-child { color: var(--ink-dim); }
+  td.l, th.l { text-align: left; }
+  tbody td.l { color: var(--ink); }
+
+  /* ---- phase strip ---- */
+  .phases {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+    font-family: var(--mono); font-size: 0.72rem;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 0.9rem 1rem; background: var(--surface); overflow-x: auto;
+  }
+  .phase {
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--rule); color: var(--ink);
+    white-space: nowrap;
+  }
+  .arrow { color: var(--ink-dim); white-space: nowrap; }
+
+  /* ---- callout ---- */
+  .callout {
+    background: var(--warn-bg);
+    border-left: 3px solid var(--cha);
+    padding: 1.1rem 1.25rem;
+    display: flex; flex-direction: column; gap: 0.6rem;
+  }
+  .callout .label {
+    font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--cha);
+  }
+  .callout p { font-size: 0.95rem; }
+  .callout ul { margin: 0; padding-left: 1.1rem; color: var(--ink-dim); font-size: 0.95rem; }
+  .callout li { margin-bottom: 0.3rem; }
+
+  ul.plain { margin: 0; padding-left: 1.1rem; }
+  ul.plain li { margin-bottom: 0.4rem; }
+
+  /* ---- figures ---- */
+  figure {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 1.25rem 1rem 0.9rem;
+    display: flex; flex-direction: column; gap: 0.8rem;
+  }
+  figure svg { width: 100%; height: auto; display: block; }
+  figcaption {
+    font-family: var(--mono); font-size: 0.74rem;
+    color: var(--ink-dim); line-height: 1.6;
+  }
+  figcaption b { color: var(--ink); }
+  .svg-label { font: 600 9px var-mono, ui-monospace, monospace; }
+  text { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 8px; }
+
+  .know {
+    font-family: var(--mono); font-size: 0.68rem;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--sen); border: 1px solid var(--sen);
+    padding: 0.1em 0.5em; border-radius: 2px;
+    white-space: nowrap;
+  }
+
+  /* ---- easing race demo ---- */
+  .race { display: flex; flex-direction: column; gap: 0.7rem; }
+  .lane {
+    display: grid; grid-template-columns: 11rem 1fr; gap: 0.8rem;
+    align-items: center;
+  }
+  .lane .who {
+    font-family: var(--mono); font-size: 0.72rem; color: var(--ink-dim);
+    text-align: right; line-height: 1.4;
+  }
+  .lane .who b { color: var(--ink); font-weight: 600; }
+  .track {
+    position: relative; height: 22px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .track::before, .track::after {
+    content: ""; position: absolute; bottom: 0; width: 2px; height: 22px;
+    background: var(--ink-dim);
+  }
+  .track::before { left: 0; }
+  .track::after { right: 0; }
+  .dot {
+    position: absolute; bottom: 4px; left: 0;
+    width: 14px; height: 14px; border-radius: 2px;
+    background: var(--int);
+    transition: left linear;
+    transition-duration: 2s;
+  }
+  .dot.out { background: var(--cha); transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1); }
+  .dot.in  { background: var(--sen); transition-timing-function: cubic-bezier(0.55, 0.06, 0.68, 0.19); }
+  .race.racing .dot { left: calc(100% - 14px); }
+  .race button {
+    font-family: var(--mono); font-size: 0.78rem;
+    background: var(--ink); color: var(--ground);
+    border: none; padding: 0.45rem 1.1rem; align-self: flex-start;
+    cursor: pointer;
+  }
+
+  @media (max-width: 40rem) {
+    html { font-size: 22px; }
+    body { padding: 2rem 1rem 4rem; line-height: 1.7; }
+    .beat, .cutline { grid-template-columns: 1fr; gap: 0.5rem; }
+    .clock { display: flex; align-items: baseline; gap: 0.6rem; }
+    .mins { display: inline; }
+    pre, code { line-height: 1.7; }
+    .lane { grid-template-columns: 1fr; }
+    .lane .who { text-align: left; }
+  }
+</style>
+
+<div class="page">
+
+  <header>
+    <h1>Time, Eased — The Animation Lab</h1>
+    <p class="lede">All semester, state has changed <em>instantly</em>: a key flips a number and the number is already different. Today the engine learns that a value can <em>travel</em> — that an animation is not a process but a pure function of elapsed seconds. We build the machinery in a throwaway lab, then name the two places the game is about to demand it: the pack reveal and the walk cycle.</p>
+    <div class="meta">
+      <span><b>2h00</b> budget</span>
+      <span>CC3096 · <b>Small Talk</b></span>
+      <span>branch <b>12-AnimationLab</b></span>
+      <span>lab scene: <b>animLab</b> (tabs 1–5)</span>
+    </div>
+  </header>
+
+  <div class="section">
+    <h2>The one idea</h2>
+    <p class="lede" style="font-size:0.98rem;">Everything in this class hangs from a single sentence — say it out loud at 0:00 and revisit it at every beat:</p>
+    <div class="phases" style="text-transform:none; letter-spacing:0; font-size:0.85rem;">
+      An animation is a <b>&nbsp;value = f(elapsed&nbsp;seconds)&nbsp;</b> — and a system's only job is to feed it time.
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th class="l">kind</th><th class="l">question it answers</th><th class="l">the formula</th><th class="l">lab tab</th></tr></thead>
+        <tbody>
+          <tr><td class="l"><b>clip</b> (frame anim)</td><td class="l">which picture of the strip?</td><td class="l">frame = floor(t · N/D) % N + 1</td><td class="l">2, 3, 5</td></tr>
+          <tr><td class="l"><b>tween</b> (property anim)</td><td class="l">what number right now?</td><td class="l">value = from + (to−from) · ease(t/D)</td><td class="l">4, 5</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="why">Two different outputs, <em>the same input</em>: seconds. That's why they compose on one entity in tab 5, and why real engines (Unity's Animator, Godot's AnimationPlayer, Bevy's animations) store keyframe tracks as data sampled by time — exactly what we're hand-rolling at jam scale. The components in our lab literally hold only <code>t</code>; ask the overlay to prove it.</p>
+  </div>
+
+  <div class="section">
+    <h2>Why "seconds", out loud</h2>
+    <div class="finding">
+      <p><b>The machine you build it on is not the machine they run it on.</b> <code>love.update(dt)</code> hands every system the frame's real length — 1/144 s on a student's gaming laptop, 1/60 on the projector, a stutter's 1/25 in between. "Frame = frame + 1" per update makes the walk cycle run at <em>whatever the framerate happens to be</em>. This class has already been bitten once: lesson 08's typewriter advanced one character per frame no matter what <code>speed</code> said, exactly this bug wearing a trench coat. The table the day loop wrote then, the whole class writes now.</p>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th class="l">authored as</th><th>60 fps</th><th>144 fps</th><th>stutter (25 fps)</th></tr></thead>
+        <tbody>
+          <tr><td class="l">frame + 1 per update</td><td>15 fps ✓ by luck</td><td>36 fps ⚡</td><td>6 fps 🐌</td></tr>
+          <tr><td class="l">4 frames per 0.5 s</td><td>8 fps ✓</td><td>8 fps ✓</td><td>8 fps ✓</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="why"><span class="know">Stardew</span> <span class="know">Pokémon</span> <span class="know">Celeste</span> A farmer in Stardew Valley takes visibly <em>fewer steps per second</em> than your engine draws frames. The artist authored "this step takes half a second"; the engine converts that into whatever frame the GPU is on right now. Seconds are the design unit; the frame index is a render-time opinion.</p>
+  </div>
+
+  <div class="section">
+    <h2>Figure — the sheet is a grid, the quad is a subtraction</h2>
+    <figure>
+      <svg viewBox="0 0 560 170" role="img" aria-label="lab_walk spritesheet with quad math">
+        <image href="../../assets/lab_walk.png" x="14" y="14" width="128" height="128" style="image-rendering:pixelated"/>
+        <g stroke-width="0.5" opacity="0.5" style="stroke:var(--ink-dim)">
+          <line x1="46" y1="14" x2="46" y2="142"/><line x1="78" y1="14" x2="78" y2="142"/><line x1="110" y1="14" x2="110" y2="142"/>
+          <line x1="14" y1="46" x2="142" y2="46"/><line x1="14" y1="78" x2="142" y2="78"/><line x1="14" y1="110" x2="142" y2="110"/>
+        </g>
+        <rect x="14" y="14" width="160" height="160" fill="none"/>
+        <g>
+          <rect x="4" y="4" width="148" height="148" fill="none" stroke-width="0.75" style="stroke:var(--ink-dim)"/>
+          <text x="14" y="176" style="fill:var(--ink-dim)">assets/lab_walk.png · 128×128 · 32px cells</text>
+        </g>
+        <rect x="80" y="80" width="32" height="32" fill="none" stroke-width="3" style="stroke:var(--cha)"/>
+        <g style="fill:var(--ink)">
+          <text x="186" y="30">row = <tspan style="fill:var(--int)">which animation</tspan>   → y = (row − 1) × 32</text>
+          <text x="186" y="48">frame = which picture inside  → x = (frame − 1) × 32</text>
+        </g>
+        <g style="fill:var(--cha)">
+          <text x="186" y="84">quad(3, 3)  =</text>
+          <text x="186" y="100">  newQuad((3−1)·32, (3−1)·32, 32, 32)</text>
+        </g>
+        <text x="186" y="132" style="fill:var(--ink-dim)">Lua counts from 1 · pixels count from 0 · (n−1) is the truce.</text>
+      </svg>
+      <figcaption><b>The sprite sheet has two indices because it has two meanings.</b> A sheet is one texture cut into a grid: the <b>row</b> picks an animation strip (blue/red/green/cream — four different walks), the <b>frame</b> picks a picture inside it. A Quad caches "start drawing at this pixel, for 32×32." The art in <span class="know">Hollow Knight</span> and <span class="know">Hades</span> ships the same way, as atlases — thousands of cells, same subtraction — because a GPU wants few, big textures, not many small ones. <span class="know">libGDX TextureAtlas</span> <span class="know">Unity Sprite Atlas</span> are this file plus an editor.</figcaption>
+    </figure>
+  </div>
+
+  <div class="section">
+    <h2>Figure — a clock, read as a staircase</h2>
+    <figure>
+      <svg viewBox="0 0 560 190" role="img" aria-label="time to frame staircase for a 4-frame clip">
+        <g stroke-width="1" style="stroke:var(--rule)">
+          <line x1="50" y1="30" x2="50" y2="150"/><line x1="50" y1="150" x2="470" y2="150"/>
+        </g>
+        <g stroke-width="2.5" fill="none" style="stroke:var(--int)">
+          <path d="M50 141 H155 V113 H260 V85 H365 V57 H470"/>
+          <path d="M470 57 H575 V29" opacity="0.35"/>
+        </g>
+        <circle cx="330" cy="85" r="4" style="fill:var(--cha)"/>
+        <text x="340" y="80" style="fill:var(--cha)">t = 0.90s → floor(0.90/1.2 × 4)+1 = frame 3</text>
+        <g style="fill:var(--ink-dim)">
+          <text x="50" y="164" text-anchor="middle">0</text>
+          <text x="155" y="164" text-anchor="middle">0.3</text>
+          <text x="260" y="164" text-anchor="middle">0.6</text>
+          <text x="365" y="164" text-anchor="middle">0.9</text>
+          <text x="470" y="164" text-anchor="middle">1.2 → loops</text>
+          <text x="40" y="144" text-anchor="end">1</text>
+          <text x="40" y="116" text-anchor="end">2</text>
+          <text x="40" y="88" text-anchor="end">3</text>
+          <text x="40" y="60" text-anchor="end">4</text>
+          <text x="522" y="95" transform="rotate(90 522 95)" text-anchor="middle">frame index</text>
+        </g>
+        <g style="fill:var(--ink)">
+          <text x="50" y="22">4 frames / 1.2 s</text>
+          <text x="200" y="22" style="fill:var(--ink-dim)">= 3.33 fps · authored in seconds, sampled by seconds, drawn as a staircase</text>
+        </g>
+      </svg>
+      <figcaption><b>frame = floor(t / D × N) % N + 1.</b> Time flows in, the frame index marches — and <code>floor()</code> is the reason it steps instead of sliding. The <code>% N</code> loops forever: this clip has no ending, it just keeps being walked. This exact line lives in <code>src/anim/SpriteClip.frameAt</code>, and <code>tests/animation.lua</code> runs it under luajit with <em>no LÖVE at all</em> — because the function's only input is a number.</figcaption>
+    </figure>
+  </div>
+
+  <div class="section">
+    <h2>The second arrow: tweens, and what a curve actually is</h2>
+    <figure>
+      <svg viewBox="0 0 560 200" role="img" aria-label="three easing curves over the same duration">
+        <g stroke-width="1" style="stroke:var(--rule)">
+          <line x1="50" y1="20" x2="50" y2="170"/><line x1="50" y1="170" x2="450" y2="170"/>
+        </g>
+        <line x1="50" y1="20" x2="450" y2="20" stroke-width="1" stroke-dasharray="3 4" style="stroke:var(--rule)"/>
+        <g fill="none" stroke-width="2.5">
+          <path d="M50 170 L450 20" style="stroke:var(--ink-dim)"/>
+          <path d="M50 170 C150 60, 300 24, 450 20" style="stroke:var(--int)"/>
+          <path d="M50 170 C180 14, 320 60, 450 20" style="stroke:var(--cha)"/>
+        </g>
+        <g>
+          <circle cx="450" cy="20" r="4" style="fill:var(--sen)"/>
+          <text x="458" y="14" style="fill:var(--sen)">every curve lands here,</text>
+          <text x="458" y="26" style="fill:var(--sen)">at exactly t = 2.0s</text>
+        </g>
+        <g style="fill:var(--ink-dim)">
+          <text x="50" y="184" text-anchor="middle">0s</text>
+          <text x="250" y="184" text-anchor="middle">1s</text>
+          <text x="450" y="184" text-anchor="middle">2s</text>
+          <text x="30" y="100" transform="rotate(-90 30 100)" text-anchor="middle">value</text>
+        </g>
+        <g>
+          <text x="60" y="90" style="fill:var(--ink-dim)">linear</text>
+          <text x="200" y="40" style="fill:var(--int)">outQuad — fast, settling</text>
+          <text x="255" y="120" style="fill:var(--cha)">outBack — overshoots, returns</text>
+        </g>
+      </svg>
+      <figcaption><b>An easing curve is a velocity opinion.</b> The duration is a <em>fact</em> (it goes in <code>tests/</code>: "arrives at 2.0s, whatever the curve"); the curve is <em>feel</em>. The curve multiplies progress <code>p = t/D</code> — the clock never changes. <span class="know">iOS</span> scroll bounce is outBack at system scale. <span class="know">Hearthstone</span> cards arc in on outQuad and land with the tiniest overshoot. And outBack's overshoot is Disney's squash-and-stretch expressed as one number: <em>commit to the landing, then correct.</em></figcaption>
+      <div class="race" id="race">
+        <div class="lane"><span class="who"><b>linear</b> — duty</span><div class="track"><span class="dot"></span></div></div>
+        <div class="lane"><span class="who"><b>outQuad</b> — arrive early, coast</span><div class="track"><span class="dot in"></span></div></div>
+        <div class="lane"><span class="who"><b>outBack</b> — overshoot, settle</span><div class="track"><span class="dot out"></span></div></div>
+        <button type="button">▶ go — 2.0 seconds, three opinions</button>
+      </div>
+      <figcaption>Same 2 s on every lane, browser-side. In the lab this is <b>tab 4</b>, three squares and <code>R</code> — run it there too, but this button is the one students can't believe is the same duration until they press it.</figcaption>
+    </figure>
+  </div>
+
+  <div class="section">
+    <h2>What's in the way</h2>
+    <p class="lede" style="font-size:0.98rem;">Read from the class repo as it stands at the end of lesson 11. The engine is healthy — resources, event entities, the four system hooks, <code>Screen</code> at 640×400 — and it has exactly one time-shaped hole.</p>
+    <div class="stack" style="gap:0;">
+      <div class="finding">
+        <span class="path">src/systems/FadeRenderSystem.lua</span>
+        <p><b>Our only animation is linear.</b> The fade computes alpha as a raw fraction of its clock — correct, but robotic. The pattern (accumulate <code>dt</code>, sample a function) is already right; today we make the function replaceable.</p>
+      </div>
+      <div class="finding">
+        <span class="path">src/ecs/Registry.lua</span>
+        <p><b>There is no "time" concept — on purpose.</b> No Timeline, no coroutine, no <code>after()</code>. Today proves the engine doesn't need one: <code>dt</code> is already a parameter of every <code>update</code>, and components can hold a number. That's the whole substrate.</p>
+      </div>
+      <div class="finding">
+        <span class="path">src/cards/CardRenderer.lua</span>
+        <p><b>Cards appear instantly.</b> The pack reveal (next class) is five cards that must <em>arrive</em>: slide in, flip, settle. The walk cycle (the class after) is a sprite that must <em>step</em>. Both are consumers of whatever we build here.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Instructor preparation — commit split</h2>
+    <p class="lede" style="font-size:0.98rem;">Same drill as lesson 11: one scaffold commit before class, the rest built live. Nothing in today's code changes a file that already exists except one <code>registerScene</code> line — say so explicitly; students should notice the engine was <em>ready</em>.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th class="l">commit</th><th class="l">contents</th><th class="l">status</th></tr></thead>
+        <tbody>
+          <tr><td class="l"><b>scaffold</b></td><td class="l">tools + assets/lab_walk.png · src/graphics/ (ImageManager, SpriteSheet) · LabInput / LabSelection / LabChrome / LabSpriteRender · AnimationLabScene with demo&nbsp;1 only · main.lua +1 line</td><td class="l">handed out</td></tr>
+          <tr><td class="l"><b>clip</b></td><td class="l">src/anim/SpriteClip.lua · ClipAnimationSystem · demo 2–3 entities + readout · tests/animation.lua (clip half)</td><td class="l">live-coded</td></tr>
+          <tr><td class="l"><b>tween</b></td><td class="l">src/anim/Easing.lua · src/anim/Tween.lua · TweenSystem · LabLaneRenderSystem · demo 4 · tests (tween half)</td><td class="l">live-coded</td></tr>
+          <tr><td class="l"><b>combo</b></td><td class="l">demo 5: one entity, both components</td><td class="l">live-coded — <b>zero new math</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="why">Pre-class: run <code>luajit tests/animation.lua</code> (must be green), boot the lab (<code>love . --debug</code> → switch to <code>animLab</code>, or flip <code>Game.start</code>), walk all five tabs once so the live build is a <em>replay</em>, not a discovery.</p>
+  </div>
+
+  <div class="section">
+    <h2>Run sheet</h2>
+
+    <div class="beat">
+      <span class="clock">0:00<span class="mins">8 min</span></span>
+      <div class="body">
+        <h3>Play the finished lab, then take it apart</h3>
+        <p class="why">Build from the scaffold commit up, or run the reference branch and walk tabs 1→5 with one sentence each: <em>"which cell am I looking at — what frame does this clock produce — three clocks, same art — three curves, same duration — a walker."</em> Then close it: "today the last two tabs don't exist yet, and tab 1 exists without you understanding it." The one-idea sentence goes on the board here.</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:08<span class="mins">12 min</span></span>
+      <div class="body">
+        <h3>Tab 1 is scaffold — teach it anyway</h3>
+        <p class="why">Demo 1 (arrows over (frame, row)) is handed out, but the <em>ideas</em> in it aren't: this is the class's first sprite, so walk the quad figure above against <code>SpriteSheet:quad</code> — six lines, one subtraction. Then the cache: <code>ImageManager.load</code> is keyed by path because <code>newImage</code> allocates texture memory twice if you call it twice, and to Lua the two copies are different objects. <em>Teaching point:</em> Godot's <code>load("res://…")</code> has cached by path since day one; every real engine converges on this.</p>
+        <p class="files"><span class="new">read</span> src/graphics/ImageManager.lua · src/graphics/SpriteSheet.lua · LabSelectionSystem (browse)</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:20<span class="mins">25 min</span></span>
+      <div class="body">
+        <h3>Live-code the clip — start with the wrong version</h3>
+        <p class="why">Write the naive thing first, on purpose:</p>
+<pre><span class="c">-- v1: the frame is the clock (WRONG — type this live, run tab 2)</span>
+sprite.frame = sprite.frame % 4 + 1        <span class="c">-- once per update()!</span></pre>
+        <p class="why">It "works" — then open the overlay's frame-time plot or tab out, and the walk halves/doubles its speed. That's the bug from the framerate table, live in ninety seconds. Now fix it honestly: the clip knows <em>frames and seconds</em>; <code>floor()</code> converts; the modulo loops.</p>
+<pre><span class="c">-- src/anim/SpriteClip.lua   ← pure, no LÖVE, testable</span>
+function SpriteClip.frameAt(clip, t)
+    local looped = t % clip.duration
+    return math.floor(looped * SpriteClip.fps(clip)) % clip.frames + 1
+end
+
+<span class="c">-- src/systems/ClipAnimationSystem.lua   ← the only consumer of dt</span>
+for _, sprite, anim, demo in registry:each("sprite", "clipAnim", "demo") do
+    if demo.n == lab.demo then
+        anim.t = anim.t + dt
+        sprite.frame = SpriteClip.frameAt(anim.clip, anim.t)
+    end
+end</pre>
+        <p class="why"><em>Pause on the split.</em> The math module has never heard of entities; the system has no opinions about easing or quads; the renderer didn't change at all. That's the atomic-systems principle doing its job — three files, each explodable alone. Tab 3 then comes <b>for free</b>: three entities, three durations, zero new code. Say it: <em>"a data-driven design is when a feature ships as a table."</em></p>
+        <p class="files"><span class="new">new</span> src/anim/SpriteClip.lua · ClipAnimationSystem.lua &nbsp;<span class="edit">edit</span> scene: demos 2–3</p>
+      </div>
+    </div>
+
+    <div class="beat check">
+      <span class="clock">0:45<span class="mins">5 min</span></span>
+      <div class="body">
+        <h3>Checkpoint · breathe</h3>
+        <p class="why">Tab 2 plays at 8-ish fps on any machine; <code>[</code> <code>]</code> retune it without touching a frame number. Press it to 0.1s and 3s and ask: <em>which one is "fast" — high fps or low duration?</em> (Same clip, opposite words. That's why we author duration.)</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">0:50<span class="mins">30 min</span></span>
+      <div class="body">
+        <h3>Live-code the tween — a value with a deadline</h3>
+        <p class="why">Same disease, property version: <code>x = x + 300*dt</code> "works" until something else needs that square to <em>arrive</em> at a moment gameplay depends on (the card is playable when it lands!). Distance-per-second is an excuse; a deadline is the design. So the API inverts: give me from, to, and <em>when</em>:</p>
+<pre><span class="c">-- src/anim/Tween.lua — one pass, then it holds</span>
+function Tween.at(tween, t)
+    local p = t / tween.duration
+    if p &lt; 0 then p = 0 elseif p &gt; 1 then p = 1 end
+    return tween.from + (tween.to - tween.from) * tween.easing(p)
+end</pre>
+        <p class="why">Then the curve: write <code>linear</code>, ask the room for "starts fast, ends soft" — collect <code>t·(2−t)</code> — then "what about past the target and back?" and drop <code>outBack</code> in as a constant they'll look up rather than derive. Press the race button on the figure. The lanes of tab 4 are the same three functions; the test line that makes it architecture and not vibes:</p>
+<pre>assert(near(Tween.at(trip, 2.0), 520), "tween missed its arrival")
+assert(Tween.at(trip, 1.5) &gt; 520,     "outBack should overshoot mid-trip")</pre>
+        <p class="why"><span class="know">Celeste</span> <span class="know">Hearthstone</span> Point out that <code>outBack</code> overshoots <em>past the endpoint</em> — the value briefly exceeds the target. That terrifies people shipping it into gameplay logic, which is the exact reason arrival is asserted at <code>p = 1</code>, not near it. Feel lives in presentation; gameplay reads the component after the system writes it — the same firewall the lab's readout shows live.</p>
+        <p class="files"><span class="new">new</span> src/anim/Easing.lua · src/anim/Tween.lua · TweenSystem.lua · LabLaneRenderSystem.lua</p>
+      </div>
+    </div>
+
+    <div class="beat check">
+      <span class="clock">1:20<span class="mins">5 min</span></span>
+      <div class="body">
+        <h3>Checkpoint · tab 4 lands together</h3>
+        <p class="why">Three squares, one <code>R</code>: they <em>always</em> arrive at the same instant with different personalities. If someone asks "why does outBack look better?" — Disney: anticipation and overshoot make motion feel alive; linear feels mechanical precisely because real objects have mass.</p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">1:25<span class="mins">15 min</span></span>
+      <div class="body">
+        <h3>Tab 5 — the payoff that costs no code</h3>
+        <p class="why">Add one entity to the scene factory with <b>both</b> components:</p>
+<pre>scene.registry:spawn({
+    position   = { x = 90, y = 150 },
+    sprite     = sprite(4),
+    clipAnim   = { clip = SpriteClip.new(4, 0.5), t = 0 },
+    tweenAnim  = { tween = Tween.new(90, 470, 2.5, Easing.outQuad), t = 0 },
+    demo       = { n = 5 },
+})</pre>
+        <p class="why">The walker steps <em>while</em> sliding in and decelerating. Draw the write-matrix on the board — two systems, two components, one entity, zero communication between them:</p>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th class="l">system</th><th class="l">reads</th><th class="l">writes</th></tr></thead>
+            <tbody>
+              <tr><td class="l">ClipAnimationSystem</td><td class="l">clipAnim.t</td><td class="l">sprite.frame</td></tr>
+              <tr><td class="l">TweenSystem</td><td class="l">tweenAnim.t</td><td class="l">position.x</td></tr>
+              <tr><td class="l">SpriteDraw (unchanged)</td><td class="l">both</td><td class="l">— nothing</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="why"><em>Teaching point — name it as the whole semester in miniature:</em> neither system knows the entity is "animated"; each sees its own component and dt. That's why Friday's reveal can combine five tweens and one flip-clip without asking permission.</p>
+        <p class="files"><span class="edit">edit</span> AnimationLabScene (demo 5) — <b>the only file that changes</b></p>
+      </div>
+    </div>
+
+    <div class="beat">
+      <span class="clock">1:40<span class="mins">10 min</span></span>
+      <div class="body">
+        <h3>Point at next week — reveal choreography preview</h3>
+        <p class="why">Sketch (on the board, not in code) the one extension the pack reveal will need: a <code>delay</code>. <span class="know">Hearthstone</span> <span class="know">Slay the Spire</span> The reveal is just staggered tweens — card <em>i</em> starts at <code>i × 0.15s</code> — and the engine-side change is one line inside TweenSystem:</p>
+<pre>local sample = anim.t - (anim.delay or 0)   <span class="c">→ Tween.at(tween, sample)</span></pre>
+        <p class="why">Five cards, four tweens each (slide, settle, glow, flip), one clip for the flip itself — <code>SpriteClip.new(6, 0.4)</code> of flip frames, same module, different row. The lab's tab 5 proved the composition; Friday proves it with a real deadline. End on the walk cycle too: the map scene needs exactly tab 5's entity with row = direction.</p>
+      </div>
+    </div>
+
+    <div class="cutline">
+      <span class="label">Cut line</span>
+      <p>Everything through tab 4 is the lesson; the combo beat is the bow on top. If the clip beat ate the clock and tab 4 is half-built, <b>ship tabs 1–2 as-is</b> — Tween.lua is 8 lines and can be handed out as a commit tomorrow morning. Never end with three squares frozen mid-lane.</p>
+    </div>
+
+    <div class="beat">
+      <span class="clock">1:50<span class="mins">10 min</span></span>
+      <div class="body">
+        <h3>Wrap — the one-idea quiz</h3>
+        <p class="why">Three questions out loud, answers on the board: (1) name the two arrows — time→frame, time→value. (2) why duration and not fps — because fps is what you <em>measure</em>, not what you <em>author</em>. (3) why can clip and tween share an entity — because they write different components and never talk. Homework below; dismiss.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>System order in AnimationLabScene</h2>
+    <p class="why">On the projector once: input → intent applied → the two clocks → paint. The clocks are <em>adjacent and symmetric</em> — that's the two-arrows slide, in code.</p>
+<pre>LabInputSystem        <span class="c">-- keys become labIntent events</span>
+LabSelectionSystem    <span class="c">-- owns the mode; applies intents; resets clocks</span>
+
+TweenSystem           <span class="c">-- tweenAnim.t → position.x   (time → value)</span>
+ClipAnimationSystem   <span class="c">-- clipAnim.t → sprite.frame (time → frame)</span>
+
+LabChromeRenderSystem <span class="c">-- clears first: the frame of the lab</span>
+LabSpriteRenderSystem <span class="c">-- quads + sheet overlays</span>
+LabLaneRenderSystem   <span class="c">-- tracks, squares, the p/eased readout</span></pre>
+  </div>
+
+  <div class="section">
+    <h2>Homework</h2>
+    <ul class="plain">
+      <li><b>Stagger.</b> Implement <code>delay</code> on tweenAnim (one line + a field) and rebuild tab 4 so the three lanes start 0.3s apart. This is literally Friday's warm-up.</li>
+      <li><b>Choreograph on paper.</b> The pack reveal: five cards, from off-screen bottom to a row, flips on click. Write it as a table — entity, components, duration, easing, delay — <em>before</em> touching code. If your table needs a new formula, you found a missing engine feature; that's what the table is for.</li>
+      <li><b>Squash &amp; stretch, in data.</b> Pick any tab and add a third <code>tweenAnim</code> (scale or y-hop) to its entity. Do you touch any system? (No — the point.) What easing makes the square feel <em>heavy</em>?</li>
+      <li><b>Watch one:</b> "Juice it or lose it" (Martin Jonasson &amp; Jan Willem Nijman, 24 min) — the whole talk is tweens and timing as design material; you'll catch three things this class shipped. <span class="know">GDC</span>
+      </li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>Vocabulary students should keep</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th class="l">term</th><th class="l">our name for it</th><th class="l">the industry name</th></tr></thead>
+        <tbody>
+          <tr><td class="l">strip of pictures</td><td class="l">SpriteClip + sheet row</td><td class="l">flipbook / sprite sheet animation</td></tr>
+          <tr><td class="l">value over deadline</td><td class="l">Tween + Easing curve</td><td class="l">tween / keyframe curve</td></tr>
+          <tr><td class="l">the saved cell rect</td><td class="l">SpriteSheet:quad</td><td class="l">atlas sprite / subimage</td></tr>
+          <tr><td class="l">path → one texture</td><td class="l">ImageManager.load</td><td class="l">resource cache / addressables</td></tr>
+          <tr><td class="l">i × 0.15s start</td><td class="l">homework</td><td class="l">stagger / overlap (sequential easing)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="why">Next classes consume this file set the way Friday's pack reveal and the map walk already planned to: <code>13-PackReveal</code> = staggered tweens + flip clip in a real scene; <code>14-WorldMap</code> = tab 5 with four rows and directional input. The lab itself is deleted from the game's path eventually — <em>the modules don't move, the scene does</em>.</p>
+  </div>
+
+</div>
+
+<script>
+  const race = document.getElementById("race");
+  const button = race.querySelector("button");
+  button.addEventListener("click", () => {
+    race.classList.remove("racing");
+    void race.offsetWidth; // reflow = rewind without a transition
+    race.classList.add("racing");
+  });
+</script>

@@ -20,6 +20,7 @@ function love.load(args)
     Game.registerScene("week", require("src.scenes.WeekScene"))
     Game.registerScene("packLab", require("src.scenes.PackLabScene"))
     Game.registerScene("collection", require("src.scenes.CollectionScene"))
+    Game.registerScene("animLab", require("src.scenes.AnimationLabScene"))
 
     -- The generator's balancing instrument remains available in the debug
     -- scene switcher; lesson 11 starts where those generated cards will live.
