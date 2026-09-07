@@ -20,6 +20,7 @@
 local imlove = require("lib.imlove")
 local Game = require("src.Game") -- for the scene switcher only
 local Screen = require("src.Screen") -- the game's resolution, one source
+local Mouse = require("src.Mouse") -- tell the game where its view sits
 local serialize = require("src.state.serialize") -- for the dump modal
 
 local DebugOverlay = {}
@@ -311,6 +312,15 @@ end
 -- like the transport bar, not a document window. Note what it ISN'T:
 -- there is no special "draw the game here" machinery. The game already
 -- landed in a texture, and a texture in a window is one Image() call.
+--
+-- It also does the input half of the same trick. A scene that reads the
+-- mouse wants GAME coordinates, but the OS gives WINDOW ones, and here
+-- the two differ by wherever the viewport happens to sit. We hand that
+-- origin to Mouse (see src/Mouse.lua) so the game never learns it is
+-- being watched — the input twin of beginGameDraw redirecting its draw.
+-- The rect is read back from the image we just placed, one frame stale
+-- by construction, which is invisible: the viewport only moves if you
+-- drag it, and a lagging cursor during a drag is furniture, not a bug.
 local function buildGameViewport()
     local sw, sh = love.graphics.getDimensions()
     local gw, gh = gameCanvas:getDimensions()
@@ -318,6 +328,8 @@ local function buildGameViewport()
     imlove.SetNextWindowPos((sw - gw) / 2 - pad, (sh - gh) / 2 - pad)
     if imlove.Begin("viewport", nil, { "NoTitleBar", "AlwaysAutoResize" }) then
         imlove.Image(gameCanvas)
+        local x0, y0 = imlove.GetItemRectMin()
+        Mouse.setOrigin(x0, y0)
     end
     imlove.End()
 end

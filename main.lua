@@ -1,13 +1,15 @@
 ----------------------------------------------------------------------
--- Lesson 13: the map — part 1, a sprite that moves.
+-- Lesson 14: the map — part 2, tiles & autotiling.
 --
 -- The engine is complete enough now to stop explaining itself and start
 -- being used. This file only bootstraps: register scenes, start one, hand
--- the callbacks to the Game. Key presses still enter the world as DATA:
--- the Game turns each one into a `keyPressed` event entity in the current
--- scene's registry — unless the overlay consumed them first. (Walking is
--- the exception: continuous held-keys are polled, not evented — see
--- MapInputSystem.)
+-- the callbacks to the Game. It opens on the tile lab, this lesson's
+-- microscope; `love . map` boots the walkable map. Key presses still enter
+-- the world as DATA: the Game turns each one into a `keyPressed` event
+-- entity in the current scene's registry — unless the overlay consumed them
+-- first. (Held input is the exception: continuous keys — walking — and mouse
+-- buttons — painting — are polled, not evented; see MapInputSystem and
+-- TileLabInputSystem.)
 ----------------------------------------------------------------------
 
 local Game = require("src.Game")
@@ -19,16 +21,31 @@ function love.load(args)
     Game.registerScene("packLab", require("src.scenes.PackLabScene"))
     Game.registerScene("collection", require("src.scenes.CollectionScene"))
     Game.registerScene("animLab", require("src.scenes.AnimationLabScene"))
+    Game.registerScene("tileLab", require("src.scenes.TileLabScene"))
     Game.registerScene("map", require("src.scenes.MapScene"))
 
-    -- The card pipeline is finished, so the game opens on the new subject:
-    -- the world the characters will walk between dates. The raising sim and
-    -- card scenes stay reachable from the debug scene switcher.
-    Game.start("map")
+    -- This lesson's subject is the tile lab, so it is what the game opens
+    -- on: `love .` shows the autotiling microscope directly. `love . map`
+    -- boots the walkable map, and every scene stays reachable from the
+    -- debug switcher.
+    --
+    -- A leading arg that names a registered scene overrides the default.
+    -- Any other first arg (e.g. --debug) is not a scene, so we fall back
+    -- to the lab.
+    local known, startScene = {}, "tileLab"
+    for _, name in ipairs(Game.sceneNames()) do
+        known[name] = true
+    end
+    if known[args[1]] then
+        startScene = args[1]
+    end
+    Game.start(startScene)
 
     attachDebugOverlay(Game)
-    if args[1] == "--debug" then
-        DebugOverlay.enterEditor()
+    for _, arg in ipairs(args) do
+        if arg == "--debug" then
+            DebugOverlay.enterEditor()
+        end
     end
 end
 
