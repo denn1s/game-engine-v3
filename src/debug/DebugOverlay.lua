@@ -31,6 +31,7 @@ local stepOnce = false
 
 local editor = false -- --debug: game-in-a-viewport (see enterEditor)
 local gameCanvas = nil -- the game's render target while in editor mode
+local viewScale = 1 -- integer upscale the viewport draws the canvas at
 
 -- The editor's backdrop, deliberately NOT black: the game keeps black
 -- (the canvas clears to it, see beginGameDraw), so the viewport reads
@@ -324,10 +325,11 @@ end
 local function buildGameViewport()
     local sw, sh = love.graphics.getDimensions()
     local gw, gh = gameCanvas:getDimensions()
+    gw, gh = gw * viewScale, gh * viewScale -- the viewport's on-screen size
     local pad = imlove.GetStyle().windowPadding
     imlove.SetNextWindowPos((sw - gw) / 2 - pad, (sh - gh) / 2 - pad)
     if imlove.Begin("viewport", nil, { "NoTitleBar", "AlwaysAutoResize" }) then
-        imlove.Image(gameCanvas)
+        imlove.Image(gameCanvas, gw, gh) -- upscale the canvas; nearest filter keeps it crisp
         local x0, y0 = imlove.GetItemRectMin()
         Mouse.setOrigin(x0, y0)
     end
@@ -346,15 +348,25 @@ end
 -- exactly like this: the editor is a big app, the game draws into a
 -- render target, and a panel displays it.
 function DebugOverlay.enterEditor()
+    -- Upscale the viewport so the game reads on a stream. The game still
+    -- draws into a Screen.w×Screen.h canvas at 1:1; only its display is
+    -- magnified, so no pixel math anywhere changes. Mouse gets the same
+    -- factor so window pixels map back to game pixels (see src/Mouse.lua).
+    viewScale = Screen.scale or 1
+    Mouse.setScale(viewScale)
+
     -- the window is sized by what has to FIT, not by a multiplier of
-    -- the game: the centered viewport plus a gutter per side wide
+    -- the game: the centered (scaled) viewport plus a gutter per side wide
     -- enough for the panels (Engine is 230 + window chrome), and
     -- headroom above/below for the transport bar. A multiplier broke
     -- the day the game's resolution changed under it (960×540 → the
     -- GDD's 640×400) and the panels no longer fit beside the viewport.
     local gutter, headroom = 280, 100
-    love.window.setMode(Screen.w + 2 * gutter, Screen.h + 2 * headroom)
+    local vw, vh = Screen.w * viewScale, Screen.h * viewScale
+    love.window.setMode(vw + 2 * gutter, vh + 2 * headroom,
+        { display = Screen.display }) -- re-open on the capture monitor
     gameCanvas = love.graphics.newCanvas(Screen.w, Screen.h)
+    gameCanvas:setFilter("nearest", "nearest") -- crisp integer upscale, no blur
     love.graphics.setBackgroundColor(EDITOR_BG)
     -- the editor keeps its OWN layout file: window positions saved in a
     -- 1440-wide editor make no sense in the 960-wide plain game (and

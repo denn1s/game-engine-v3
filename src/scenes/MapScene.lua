@@ -1,9 +1,7 @@
--- The Map — lesson 1 of 3: a sprite that MOVES.
+-- The Map — lesson 2 of 3: a moving sprite gets a tile-based PLACE.
 --
--- Today the map is one floor and one character. No tiles, no walls, no
--- other places to be. Those are lessons 14 (tiles + autotiling) and 15
--- (collision + doors). Deliberately starting with just movement keeps
--- every system here answering exactly one question.
+-- TileGrid stores what terrain exists. AutoTile derives how each terrain
+-- cell looks from its neighbors. Collision and doors remain lesson 15.
 --
 -- Look at how little this scene has to say. The story of the whole
 -- lesson is a list of single-question systems and one entity:
@@ -12,7 +10,7 @@
 --   MovementSystem        moveIntent         -> velocity, position
 --   SpriteFacingSystem    moveIntent         -> sprite.row, playing (+ wrap)
 --   SpriteAnimationSystem clipAnim + playing -> sprite.frame
---   MapBackgroundSystem   (floor)            -> behind everything
+--   TilemapRenderSystem   terrain + neighbors -> floor tiles behind everything
 --   SpriteRenderSystem    position + sprite  -> the pixels
 --   MapHudRenderSystem    (readouts/arrows)  -> on top
 --
@@ -21,14 +19,14 @@
 -- frame now instead of a clock on a demo wall. The lab paid off.
 
 local Scene = require("src.ecs.Scene")
-local Screen = require("src.Screen")
 local SpriteClip = require("src.anim.SpriteClip")
+local MapData = require("src.data.map")
 
 local MapInputSystem = require("src.systems.MapInputSystem")
 local MovementSystem = require("src.systems.MovementSystem")
 local SpriteFacingSystem = require("src.systems.SpriteFacingSystem")
 local SpriteAnimationSystem = require("src.systems.SpriteAnimationSystem")
-local MapBackgroundSystem = require("src.systems.MapBackgroundSystem")
+local TilemapRenderSystem = require("src.systems.TilemapRenderSystem")
 local SpriteRenderSystem = require("src.systems.SpriteRenderSystem")
 local MapHudRenderSystem = require("src.systems.MapHudRenderSystem")
 
@@ -47,12 +45,23 @@ return function(payload)
         normalize = true,
     })
 
+    -- One tilemap entity, not one entity per cell. A tile is a position in a
+    -- dense grid; it does not need an identity of its own.
+    scene.registry:spawn({
+        tilemap = {
+            grid = MapData.build(),
+            cell = 32,
+            ox = 0,
+            oy = 0,
+        },
+    })
+
     -- THE player: one entity, plain data, no "Player" class. Every
     -- component is owned by a different system and read by another —
     -- that cross-wiring down the system list IS the architecture.
-    local cell = 32 * SCALE
     scene.registry:spawn({
-        position = { x = (Screen.w - cell) / 2, y = (Screen.h - cell) / 2 },
+        -- Start over the upper-left lawn rather than the empty courtyard.
+        position = { x = 64, y = 64 },
         moveIntent = { dx = 0, dy = 0 },   -- written by MapInputSystem
         velocity   = { x = 0, y = 0 },      -- written by MovementSystem (px/sec)
         sprite = {                          -- read by SpriteRenderSystem
@@ -73,7 +82,7 @@ return function(payload)
     scene:addSystem(MovementSystem)
     scene:addSystem(SpriteFacingSystem)
     scene:addSystem(SpriteAnimationSystem)
-    scene:addSystem(MapBackgroundSystem)
+    scene:addSystem(TilemapRenderSystem)
     scene:addSystem(SpriteRenderSystem)
     scene:addSystem(MapHudRenderSystem)
 

@@ -12,6 +12,12 @@
 -- the editor window's.)
 --
 -- 640×400 is the PC-98 resolution Princess Maker and Tokimeki Memorial
--- were drawn for (see docs/GDD.md §10.5). For now the window matches it
--- 1:1; ×2 integer scaling arrives with the presentation lesson.
-return { w = 640, h = 400 }
+-- were drawn for (see docs/GDD.md §10.5). The game ALWAYS draws in these
+-- logical pixels — no system knows about the window size.
+--
+-- scale: the integer window multiplier. The plain game still opens 1:1,
+-- but the --debug editor viewport upscales its canvas by this so the game
+-- is big enough to read on a stream. Changing it touches no pixel math.
+-- display: which monitor to open on (1 = primary). 2 here = the screen
+-- captured for the online class.
+return { w = 640, h = 400, scale = 2, display = 2 }

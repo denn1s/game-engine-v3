@@ -8,5 +8,6 @@ function love.conf(t)
     t.window.title = "Small Talk"
     t.window.width = Screen.w
     t.window.height = Screen.h
+    t.window.display = Screen.display -- open on the capture monitor
     t.version = "11.5"
 end

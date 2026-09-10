@@ -28,6 +28,12 @@ local Mouse = {}
 -- plain game; the editor overwrites it every frame it shows the viewport.
 local originX, originY = 0, 0
 
+-- The viewport's upscale factor. 1 in the plain game and at unscaled size;
+-- the editor installs Screen.scale so the window-pixel gap between the
+-- cursor and the viewport origin is turned back into GAME pixels by
+-- dividing — the exact inverse of the scale imlove.Image draws the canvas at.
+local scale = 1
+
 -- Install where the game sits in the window. Not game API — only the
 -- editor calls it. Passing nil restores the plain-mode identity.
 function Mouse.setOrigin(x, y)
@@ -38,6 +44,12 @@ function Mouse.setOrigin(x, y)
     end
 end
 
+-- Install the viewport upscale. Not game API — only the editor calls it.
+-- Passing nil restores the 1:1 identity.
+function Mouse.setScale(s)
+    scale = (s and s > 0) and s or 1
+end
+
 -- The pointer in game pixels, plus whether it is over the game at all.
 -- The inside flag is what lets a scene ignore a cursor that is actually
 -- over an editor panel rather than the world — the game coordinate could
@@ -45,7 +57,7 @@ end
 -- not bounded-by-window, is the honest test.
 function Mouse.position()
     local mx, my = love.mouse.getPosition()
-    local gx, gy = mx - originX, my - originY
+    local gx, gy = (mx - originX) / scale, (my - originY) / scale
     local inside = gx >= 0 and gx < Screen.w and gy >= 0 and gy < Screen.h
     return gx, gy, inside
 end
